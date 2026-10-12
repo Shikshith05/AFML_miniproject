@@ -1,14 +1,68 @@
-data/*
-!data/raw/
-!data/raw/.gitkeep
-!data/processed/
-!data/processed/.gitkeep
-!data/preference/
-!data/preference/.gitkeep
-checkpoints/*
-!checkpoints/.gitkeep
+# --- Virtual environments (keep out of repo) ---
+env/
+.env/
+venv/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+conda-env/
+.conda/
+
+# --- Secrets ---
+.env
+*.env
+.envrc
+
+# --- Python ---
 __pycache__/
 *.py[cod]
-.pytest_cache/
-.venv/
+*$py.class
+*.so
 *.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# --- Data (keep folder structure, ignore contents) ---
+data/**
+!data/**/
+!data/**/.gitkeep
+
+# --- Checkpoints / model weights ---
+checkpoints/**
+!checkpoints/.gitkeep
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.bin
+
+# --- Experiment tracking / logs ---
+wandb/
+runs/
+lightning_logs/
+mlruns/
+tensorboard/
+logs/
+*.log
+
+# --- Hugging Face cache ---
+.cache/
+huggingface/
+
+# --- OS / IDE ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
