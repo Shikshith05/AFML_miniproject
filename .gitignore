@@ -1,0 +1,14 @@
+data/*
+!data/raw/
+!data/raw/.gitkeep
+!data/processed/
+!data/processed/.gitkeep
+!data/preference/
+!data/preference/.gitkeep
+checkpoints/*
+!checkpoints/.gitkeep
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+*.egg-info/

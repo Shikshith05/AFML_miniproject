@@ -1,0 +1,1 @@
+"""Define model configuration structures."""

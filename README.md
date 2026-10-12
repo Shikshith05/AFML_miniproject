@@ -1,1 +1,1 @@
-# AFML_miniproject
+# AFML SLM GQA DPO

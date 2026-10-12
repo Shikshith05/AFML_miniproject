@@ -1,0 +1,2 @@
+num_query_heads: 8
+num_key_value_groups: 2
