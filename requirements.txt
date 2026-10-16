@@ -1,0 +1,8 @@
+torch>=2.1
+tokenizers>=0.15
+datasets>=2.16
+numpy
+pyyaml
+tqdm
+matplotlib
+pytest
