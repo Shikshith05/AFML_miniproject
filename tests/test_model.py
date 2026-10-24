@@ -1,9 +1,11 @@
 """Test the language model."""
 
 import dataclasses
+import math
 
 import pytest
 import torch
+import torch.nn.functional as F
 
 from slm.model.config import ModelConfig, gqa_base, mha_baseline
 from slm.model.kv_cache import KVCache
@@ -196,3 +198,36 @@ def test_matched_ffn_hidden_equalises_gqa_with_mha():
     assert ffn == 1664  # 1408 + 256
     matched = dataclasses.replace(gqa, ffn_hidden=ffn)
     assert count_params(Transformer(matched))["total"] == HAND_COUNTS[8]["total"]
+
+
+# --------------------------------------------------------------------------
+# Overfit check
+# --------------------------------------------------------------------------
+
+def test_tiny_model_memorises_one_batch():
+    """A model that cannot memorise 100 tokens has a bug somewhere -- a broken
+    gradient path, a mask leak or a bad init. Takes ~2 s on CPU."""
+    torch.manual_seed(0)
+    cfg = ModelConfig(d_model=64, n_layers=2, n_heads=4, n_kv_heads=2, max_seq_len=64)
+    model = Transformer(cfg)
+    tokens = torch.randint(0, VOCAB, (2, 51))
+    x, y = tokens[:, :-1], tokens[:, 1:]  # 2 x 50 = 100 next-token targets
+    opt = torch.optim.AdamW(model.parameters(), lr=3e-3, weight_decay=0.0)
+
+    def loss_fn() -> torch.Tensor:
+        return F.cross_entropy(model(x).reshape(-1, VOCAB), y.reshape(-1))
+
+    # Untrained, every token is about equally likely: loss ~ ln(vocab) = 8.32
+    initial = loss_fn().item()
+    assert abs(initial - math.log(VOCAB)) < 0.3
+
+    for _ in range(300):
+        loss = loss_fn()
+        opt.zero_grad()
+        loss.backward()
+        opt.step()
+
+    final = loss_fn().item()
+    assert final < 0.05, f"loss only fell from {initial:.3f} to {final:.3f}"
+    with torch.no_grad():
+        assert (model(x).argmax(-1) == y).all()  # every target token recalled
