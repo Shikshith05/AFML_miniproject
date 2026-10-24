@@ -8,8 +8,8 @@ measurements: [docs/track_a_notes.md](docs/track_a_notes.md).
 ```powershell
 .venv\Scripts\Activate.ps1
 
-# Full pipeline: 1% val holdout (seed 1337) -> tokenizer trained on the train
-# side only -> data/train.bin, data/val.bin, data/meta.json
+# Full pipeline (~13 min): 1% val holdout (seed 1337) -> ftfy text cleaning ->
+# tokenizer trained on the train side only -> data/train.bin, data/val.bin, data/meta.json
 python scripts/prepare_data.py --train-tokenizer
 
 # Sanity check: decode random val windows, fertility, <unk> rate

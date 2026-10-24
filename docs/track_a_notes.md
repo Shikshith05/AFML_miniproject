@@ -58,7 +58,9 @@ inject a real EOS.
   which we do **not** use. It's available as an untouched test set if the
   paper needs one.
 
-## 2026-10-24: Measurements (full run)
+## 2026-10-24: Measurements (first full run, before text cleaning)
+
+*Superseded by the cleaned run below. Kept for comparison.*
 
 | | value |
 |---|---|
@@ -87,8 +89,68 @@ replacement, so there is no hard epoch boundary, but the repetition is real.
 `’` (UTF-8 punctuation decoded as cp1252). With no normalizer, about 19 of
 the 3,836 merges went to those fragments, and a correct curly quote costs
 3 tokens. Normalizing it (fixing the mojibake and mapping curly quotes to
-ASCII) would need a re-tokenize. Not done, to keep the files everyone is
-building on stable. If we do it later, do it before the final pretraining runs.
+ASCII) would need a re-tokenize. **Fixed in the next entry.**
+
+## 2026-10-24: Text cleaning with ftfy (tokenizer retrained, data re-encoded)
+
+**What:** every story now goes through `slm.data.tinystories.clean_text`
+before anything sees it. That happens in `iter_chunks`, the single
+text-loading path used by both tokenizer training and `prepare_data.py`.
+`clean_text` is `ftfy.fix_text()` with default settings, plus a one-line
+pre-pass:
+
+- **Why the pre-pass:** `”` is UTF-8 `E2 80 9D`, and `0x9D` has no cp1252
+  character, so in TinyStories that byte was lost, leaving a bare `â€`.
+  ftfy cannot restore a missing byte. Before a space it guesses `E2 80 A0`
+  and outputs `†`. A `â€` that is not followed by a valid cp1252
+  continuation character can only be a broken `”`, so the pre-pass restores
+  it, and ftfy then handles it like any other quote. Without the pre-pass,
+  about half of the affected stories (1,364 of the first 50k checked) still
+  had mojibake or a spurious `†` after ftfy.
+- ftfy's defaults also straighten curly quotes to ASCII (`’` → `'`, `“”` →
+  `"`), NFC-normalize and fix line breaks. Dashes and ellipses (`–`, `—`, `…`)
+  are kept as they are.
+- Cleaning version `ftfy-6.3.1+rdquo-v1` is recorded in `data/meta.json` and
+  `artifacts/tokenizer/train_info.json`. `prepare_data.py` refuses a tokenizer
+  whose cleaning version or split hash doesn't match. `ftfy>=6.1` was added to
+  `requirements.txt`.
+- Cleaning runs in a process pool (8 workers, bounded batches, under
+  `__main__`). It runs once per pass, adding about 1.5 min to tokenizer
+  training and 2.7 min to encoding compared with the uncleaned run. Tested
+  against the serial path.
+
+**Split unchanged:** the split is over story indices, so the fingerprint is
+still **`37c59ce9ec55a6fd`**. The story counts are identical too
+(2,098,295 train / 21,194 val / 230 empty skipped).
+
+**How many stories changed:** **130,107 of 2,119,719 (6.1%)**. Of those,
+130,085 had mojibake (`â€…`, `Ã…`, `Â`) in the raw text. Almost all of the
+other 22 had genuine curly punctuation.
+
+**Residue:** the decoded val set has no `â€`/`Ã` sequences. One stray `Â`
+byte is left at a story boundary out of 4.85M tokens, and it isn't worth a
+special case. The 19 mojibake merges are gone. The only merges that decode
+to non-ASCII are the shared byte prefix `E2 80` of `–` / `—` / `…`, which is
+normal for byte-level BPE.
+
+| | before cleaning | **after cleaning** |
+|---|---|---|
+| train tokens | 483,082,605 | **481,574,529** (−0.31%) |
+| val tokens | 4,866,321 | **4,850,760** |
+| fertility (val, content tokens ÷ words) | 1.301 | **1.297** (1.308 counting `<bos>`/`<eos>`) |
+| GPT-2 fertility, same val text | 1.269 | 1.263 |
+| avg tokens per story | 229.6 | 228.9 |
+| `<unk>` rate | 0.0% | 0.0% |
+
+Run time: tokenizer training 365 s, clean + encode 424 s, **13.2 min**
+total. The epoch estimate for track C is unchanged: 1.31B / 481.6M ≈ 2.7
+epochs.
+
+**For other tracks:** `Tokenizer.encode` does **not** clean text, because
+that keeps encode/decode exactly lossless. Any text fed to the model (SFT
+data, eval prompts, DPO pairs) should go through `clean_text` first so it
+matches the pretraining distribution. In particular, the model has almost
+never seen a curly quote.
 
 ## Format contract (what other tracks rely on)
 
@@ -120,7 +182,7 @@ building on stable. If we do it later, do it before the final pretraining runs.
 ## How to reproduce
 
 ```powershell
-python scripts/prepare_data.py --train-tokenizer   # ~9 min + first download
+python scripts/prepare_data.py --train-tokenizer   # ~13 min + first download
 python scripts/inspect_data.py                     # windows, fertility, <unk> %
 python -m pytest tests/test_tokenizer.py -q
 ```
