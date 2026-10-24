@@ -55,6 +55,8 @@ def split_stories(data: np.ndarray, bos: int, eos: int) -> list[np.ndarray]:
 
 def main() -> int:
     args = parse_args()
+    # Windows consoles default to cp1252; don't crash on an emoji in a story.
+    sys.stdout.reconfigure(errors="backslashreplace")
     data_dir = Path(args.data_dir)
     tok = Tokenizer.load(args.tokenizer)
     data = np.memmap(data_dir / "val.bin", dtype=TOKEN_DTYPE, mode="r")
