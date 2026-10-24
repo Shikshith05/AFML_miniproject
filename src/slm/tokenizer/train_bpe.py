@@ -88,12 +88,12 @@ def train_on_tinystories(
     max_stories: int | None = None,
     info: dict[str, Any] | None = None,
 ) -> Tokenizer:
-    """Train on the TRAIN side of the split only, then save with a train_info.json.
+    """Train on the (cleaned) TRAIN side of the split only, then save with a train_info.json.
 
     ``limit`` truncates the dataset (smoke runs); ``max_stories`` caps how many
     train stories the tokenizer sees.
     """
-    from slm.data.tinystories import iter_stories, split_hash
+    from slm.data.tinystories import cleaning_version, iter_stories, split_hash
 
     n_lim = len(ds) if limit is None else min(limit, len(ds))
     n_avail = n_lim - int(np.searchsorted(val_indices, n_lim))  # val_indices is sorted
@@ -119,6 +119,7 @@ def train_on_tinystories(
         "limit": limit,
         "max_stories": max_stories,
         "split_hash": split_hash(val_indices),
+        "text_cleaning": cleaning_version(),
         "train_seconds": round(dt, 1),
         **(info or {}),
     }

@@ -4,12 +4,17 @@ TinyStories -> data/train.bin, data/val.bin (flat np.uint16 token streams,
 each story as <bos> tokens <eos>), plus data/meta.json and the val holdout
 indices in data/val_indices.npy.
 
+Every story goes through slm.data.tinystories.clean_text (ftfy + a fix for
+TinyStories' broken closing quotes) on the shared loading path, so the
+tokenizer and the token files see the same text.
+
 Steps, in order:
   1. Hold out 1% of stories as val (seed 1337), computed over the full dataset.
   2. Train the tokenizer on the train side only -- if --train-tokenizer is
      given or no tokenizer exists yet. An existing tokenizer is checked
-     against the split fingerprint so val text can't have leaked into it.
-  3. Encode in batches, streaming to disk.
+     against the split fingerprint (so val text can't have leaked into it)
+     and the cleaning version.
+  3. Clean and encode in batches, streaming to disk.
 
     python scripts/prepare_data.py --train-tokenizer      # full pipeline
     python scripts/prepare_data.py --limit 20000 --train-tokenizer   # smoke run
@@ -39,6 +44,8 @@ from slm.data.tinystories import (
     DEFAULT_SEED,
     DEFAULT_VAL_FRACTION,
     TOKEN_DTYPE,
+    cleaning_version,
+    iter_chunks,
     load_tinystories,
     split_hash,
     split_val_indices,
@@ -58,6 +65,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--seed", type=int, default=DEFAULT_SEED)
     p.add_argument("--val-fraction", type=float, default=DEFAULT_VAL_FRACTION)
     p.add_argument("--batch-size", type=int, default=10_000, help="stories per encode batch")
+    p.add_argument("--num-proc", type=int, default=None, help="text-cleaning processes (default: min(8, cpus))")
     return p.parse_args()
 
 
@@ -119,11 +127,12 @@ def main() -> int:
         )
         timings["tokenizer_s"] = time.perf_counter() - t0
     else:
-        info = load_train_info(tok_path)
-        if info is None or info.get("split_hash") != shash:
+        info = load_train_info(tok_path) or {}
+        want = {"split_hash": shash, "text_cleaning": cleaning_version()}
+        got = {k: info.get(k) for k in want}
+        if got != want:
             raise SystemExit(
-                f"{tok_path} was not trained on this split (its split_hash: "
-                f"{None if info is None else info.get('split_hash')}, current: {shash}). "
+                f"{tok_path} was trained on different data (it has {got}, current is {want}). "
                 "Pass --train-tokenizer to retrain it."
             )
         print(f"using existing tokenizer {tok_path} (trained on {info['n_stories_trained']:,} stories)")
@@ -140,13 +149,14 @@ def main() -> int:
     n_tokens = {"train": 0, "val": 0}
     n_stories = {"train": 0, "val": 0}
     n_empty = 0
+    n_cleaned = 0
     max_id = 0
     try:
-        with tqdm(total=n, desc="encoding", unit="story", unit_scale=True) as bar:
-            for start in range(0, n, args.batch_size):
-                stop = min(start + args.batch_size, n)
-                texts = ds[start:stop]["text"]
+        with tqdm(total=n, desc="clean+encode", unit="story", unit_scale=True) as bar:
+            for start, texts, n_changed in iter_chunks(ds, args.limit, args.batch_size, args.num_proc):
+                stop = start + len(texts)
                 mask = is_val[start:stop]
+                n_cleaned += n_changed
                 for split, want_val in (("train", False), ("val", True)):
                     batch = [t for t, v in zip(texts, mask) if v == want_val and t.strip()]
                     if not batch:
@@ -183,6 +193,8 @@ def main() -> int:
         "n_total_stories": n_total,
         "limit": args.limit,
         "n_empty_skipped": n_empty,
+        "text_cleaning": cleaning_version(),
+        "n_stories_changed_by_cleaning": n_cleaned,
         "dtype": np.dtype(TOKEN_DTYPE).name,
         "max_token_id": max_id,
         "special_ids": {"pad": tok.pad_id, "bos": tok.bos_id, "eos": tok.eos_id, "unk": tok.unk_id},

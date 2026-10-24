@@ -17,7 +17,14 @@ import torch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from slm.data.tinystories import make_batch_provider, make_get_batch, split_val_indices  # noqa: E402
+from slm.data.tinystories import (  # noqa: E402
+    clean_batch,
+    clean_text,
+    iter_chunks,
+    make_batch_provider,
+    make_get_batch,
+    split_val_indices,
+)
 from slm.tokenizer.tokenizer import Tokenizer  # noqa: E402
 from slm.tokenizer.train_bpe import SPECIAL_TOKENS, save_tokenizer, train_bpe  # noqa: E402
 
@@ -92,6 +99,50 @@ def test_bos_eos(tok):
 def test_encode_batch_matches_encode(tok):
     texts = ROUND_TRIP[:4]
     assert tok.encode_batch(texts, add_bos=True) == [tok.encode(t, add_bos=True) for t in texts]
+
+
+# ---- cleaning ----------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "raw, clean",
+    [
+        ("Tom said, â€œHi!â€ Then he left.", 'Tom said, "Hi!" Then he left.'),
+        ("â€œWait!â€\nShe stopped.", '"Wait!"\nShe stopped.'),
+        ("I donâ€™t knowâ€.", "I don't know\"."),
+        ("CafÃ© and a naÃ¯ve cat", "Café and a naïve cat"),
+        ("Lily’s “big” day", "Lily's \"big\" day"),
+        ("Plain ASCII story.\n\nThe end.", "Plain ASCII story.\n\nThe end."),
+    ],
+)
+def test_clean_text(raw, clean):
+    assert clean_text(raw) == clean
+
+
+def test_clean_batch_counts_changes():
+    out, n = clean_batch(["fine", "donâ€™t", "also fine"])
+    assert out == ["fine", "don't", "also fine"] and n == 1
+
+
+def test_iter_chunks_parallel_matches_serial():
+    ds = _FakeDataset(["ok", "donâ€™t", "x â€ y"] * 7)
+    serial = list(iter_chunks(ds, batch_size=4, num_proc=1))
+    parallel = list(iter_chunks(ds, batch_size=4, num_proc=2))
+    assert serial == parallel
+    assert sum(n for _, _, n in serial) == 14
+
+
+class _FakeDataset:
+    """Just enough of a HF Dataset: len() and ds[a:b]["text"]."""
+
+    def __init__(self, texts):
+        self.texts = texts
+
+    def __len__(self):
+        return len(self.texts)
+
+    def __getitem__(self, sl):
+        return {"text": self.texts[sl]}
 
 
 # ---- split -------------------------------------------------------------------

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
@@ -68,14 +69,86 @@ def load_tinystories(split: str = "train"):
     return load_dataset(DATASET_NAME, split=split)
 
 
+# --------------------------------------------------------------------------
+# Text cleaning
+# --------------------------------------------------------------------------
+
+# TinyStories v1 has UTF-8 punctuation that was decoded as cp1252 ("â€™" for
+# "’"). The closing quote ” is E2 80 9D, and 0x9D has no cp1252 character,
+# so that byte was lost, leaving a bare "â€". ftfy can't recover a missing
+# byte (before a space it guesses E2 80 A0 and gives "†"). A "â€" not followed
+# by a cp1252 continuation character can only be a broken ”, so restore it
+# first and let ftfy handle the rest.
+_CP1252_CONTINUATION = "".join(
+    bytes([b]).decode("cp1252") for b in range(0x80, 0xC0) if b not in (0x81, 0x8D, 0x8F, 0x90, 0x9D)
+)
+_BROKEN_RDQUO = re.compile("â€(?![" + re.escape(_CP1252_CONTINUATION) + "])")
+
+
+def cleaning_version() -> str:
+    """Identifies the cleaning applied, recorded beside the tokenizer and data."""
+    import ftfy
+
+    return f"ftfy-{ftfy.__version__}+rdquo-v1"
+
+
+def clean_text(text: str) -> str:
+    """Fix mojibake (and ftfy's defaults: curly quotes -> ASCII, NFC, line breaks)."""
+    import ftfy
+
+    return ftfy.fix_text(_BROKEN_RDQUO.sub("”", text))
+
+
+def clean_batch(texts: list[str]) -> tuple[list[str], int]:
+    """Cleaned texts and how many of them changed."""
+    out = [clean_text(t) for t in texts]
+    return out, sum(a != b for a, b in zip(texts, out))
+
+
+def iter_chunks(
+    ds,
+    limit: int | None = None,
+    batch_size: int = 10_000,
+    num_proc: int | None = None,
+) -> Iterator[tuple[int, list[str], int]]:
+    """Yield ``(start, cleaned_texts, n_changed)`` over the dataset in order.
+
+    This is the one text-loading path: tokenizer training and encoding both
+    go through it, so they see identical cleaned text. Cleaning runs in a
+    process pool, a bounded number of chunks at a time, so memory stays flat.
+    Callers must be under ``if __name__ == "__main__":`` on Windows.
+    """
+    n = len(ds) if limit is None else min(limit, len(ds))
+    starts = list(range(0, n, batch_size))
+    num_proc = num_proc or min(8, os.cpu_count() or 1)
+
+    def raw(start: int) -> list[str]:
+        return ds[start : min(start + batch_size, n)]["text"]
+
+    if num_proc <= 1:
+        for s in starts:
+            yield (s, *clean_batch(raw(s)))
+        return
+
+    from multiprocessing import Pool
+
+    wave = 2 * num_proc
+    with Pool(num_proc) as pool:
+        for i in range(0, len(starts), wave):
+            group = starts[i : i + wave]
+            for s, (texts, n_changed) in zip(group, pool.map(clean_batch, [raw(s) for s in group])):
+                yield s, texts, n_changed
+
+
 def iter_stories(
     ds,
     val_indices: np.ndarray,
     which: str,
     limit: int | None = None,
     batch_size: int = 10_000,
+    num_proc: int | None = None,
 ) -> Iterator[list[str]]:
-    """Yield batches of story texts from the train or val side of the split.
+    """Yield batches of cleaned story texts from the train or val side of the split.
 
     Reads the dataset sequentially (fast) and routes by a boolean mask rather
     than ``ds.select``, which would turn every read into a random access.
@@ -83,15 +156,12 @@ def iter_stories(
     """
     if which not in ("train", "val"):
         raise ValueError(f"which must be 'train' or 'val', got {which!r}")
-    n = len(ds) if limit is None else min(limit, len(ds))
     is_val = np.zeros(len(ds), dtype=bool)
     is_val[val_indices] = True
     want_val = which == "val"
 
-    for start in range(0, n, batch_size):
-        stop = min(start + batch_size, n)
-        texts = ds[start:stop]["text"]
-        mask = is_val[start:stop]
+    for start, texts, _ in iter_chunks(ds, limit, batch_size, num_proc):
+        mask = is_val[start : start + len(texts)]
         yield [t for t, v in zip(texts, mask) if v == want_val]
 
 
