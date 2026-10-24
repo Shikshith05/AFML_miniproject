@@ -1,11 +1,14 @@
 """Test the language model."""
 
+import dataclasses
+
 import pytest
 import torch
 
-from slm.model.config import ModelConfig
+from slm.model.config import ModelConfig, gqa_base, mha_baseline
 from slm.model.kv_cache import KVCache
 from slm.model.transformer import Transformer
+from slm.utils.params import count_params, matched_ffn_hidden, param_breakdown
 
 VOCAB = 4096
 
@@ -148,3 +151,48 @@ def test_kv_cache_rejects_overflow():
         model(torch.randint(0, VOCAB, (1, 8)), kv_cache=cache)
         with pytest.raises(ValueError, match="cache full"):
             model(torch.randint(0, VOCAB, (1, 1)), kv_cache=cache)
+
+
+# --------------------------------------------------------------------------
+# Parameter counts
+# --------------------------------------------------------------------------
+
+# Worked out by hand in docs/person_b_notes.md.
+HAND_COUNTS = {
+    8: {"total": 27_795_968, "embedding": 2_097_152, "non_embedding": 25_698_816},  # MHA
+    2: {"total": 24_650_240, "embedding": 2_097_152, "non_embedding": 22_553_088},  # GQA-2
+}
+
+
+@pytest.mark.parametrize("preset", [mha_baseline, gqa_base], ids=["MHA", "GQA"])
+def test_param_count_matches_config_and_hand_calculation(preset):
+    cfg = preset().model
+    counted = count_params(Transformer(cfg))
+    formula = cfg.param_counts()
+
+    assert counted == HAND_COUNTS[cfg.n_kv_heads]
+    assert counted["total"] == formula["total"]
+    assert counted["non_embedding"] == formula["non_embedding"]
+    assert counted["embedding"] == formula["embedding"]
+
+
+@pytest.mark.parametrize("preset", [mha_baseline, gqa_base], ids=["MHA", "GQA"])
+def test_param_breakdown_matches_config_per_component(preset):
+    cfg = preset().model
+    parts = param_breakdown(Transformer(cfg))
+    f = cfg.param_counts()
+
+    attn = f["layer.q_proj"] + f["layer.k_proj"] + f["layer.v_proj"] + f["layer.o_proj"]
+    ffn = f["layer.w_gate"] + f["layer.w_up"] + f["layer.w_down"]
+    assert parts["attention"] == cfg.n_layers * attn
+    assert parts["ffn"] == cfg.n_layers * ffn
+    assert parts["norms"] == cfg.n_layers * f["layer.norms"] + f["final_norm"]
+    assert parts["lm_head"] == 0  # tied
+
+
+def test_matched_ffn_hidden_equalises_gqa_with_mha():
+    mha, gqa = mha_baseline().model, gqa_base().model
+    ffn = matched_ffn_hidden(gqa, mha)
+    assert ffn == 1664  # 1408 + 256
+    matched = dataclasses.replace(gqa, ffn_hidden=ffn)
+    assert count_params(Transformer(matched))["total"] == HAND_COUNTS[8]["total"]
