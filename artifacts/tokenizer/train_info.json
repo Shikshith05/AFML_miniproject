@@ -1,0 +1,20 @@
+{
+  "type": "byte-level BPE",
+  "vocab_size": 4096,
+  "special_tokens": {
+    "<pad>": 0,
+    "<bos>": 1,
+    "<eos>": 2,
+    "<unk>": 3
+  },
+  "n_stories_trained": 2098522,
+  "limit": null,
+  "max_stories": null,
+  "split_hash": "37c59ce9ec55a6fd",
+  "text_cleaning": "ftfy-6.3.1+rdquo-v1",
+  "train_seconds": 364.9,
+  "dataset": "roneneldan/TinyStories",
+  "n_total_stories": 2119719,
+  "seed": 1337,
+  "val_fraction": 0.01
+}
