@@ -15,43 +15,6 @@ why. Sign your entries so we know who to ask.
 
 ## OPEN — to settle in the kickoff session (Sat 25 Oct)
 
-### O1. Config field naming
-
-`configs/model_mha.yaml` uses HuggingFace-style names (`num_layers`,
-`hidden_size`, `num_attention_heads`, `max_position_embeddings`). The draft
-`config.py` uses research-code style (`n_layers`, `d_model`, `n_heads`,
-`max_seq_len`).
-
-Pick one and convert everything. Either is defensible; having both is not.
-
-**Urgent sub-issue:** `configs/model_gqa.yaml` has
-`num_key_value_groups: 2`. In HF's Llama implementation that name means the
-*repeat factor* (`n_heads // n_kv_heads`), not the number of KV heads. So
-`2` is ambiguous — it reads as either 2 KV heads (4 queries each) or 4 KV
-heads (2 queries each). Rename to `n_kv_heads` and state the number of KV
-heads explicitly.
-
-- Decision:
-- Rationale:
-
-### O2. Parameter-count fairness in the ablation
-
-With identical settings apart from `n_kv_heads`, MHA has **27.80M**
-parameters and GQA has **24.65M** — GQA is 3.15M smaller. An unadjusted
-comparison confounds the attention variant with model capacity, and GQA could
-look worse purely from having fewer parameters.
-
-Options:
-1. Report perplexity against parameter count, and acknowledge the gap
-2. Raise GQA's `ffn_hidden` to equalize total parameters
-3. Report both
-
-Option 2 is the cleaner experiment; option 1 is cheaper. **Decide before the
-runs start** — it cannot be fixed afterwards.
-
-- Decision:
-- Rationale:
-
 ### O3. Per-run time budget → `max_steps`
 
 Draft `max_steps=20000` is ~1.31B tokens, likely 4–6 h on a T4. With two
@@ -138,6 +101,51 @@ directions are forced to agree on what each token means.
 MHA and GQA runs use identical seed (1337), identical data order
 (`deterministic_data_order=True`), identical token budget, and are launched
 from the same commit. Without this the comparison proves nothing.
+
+### S6. Config field naming: research-code style, YAMLs generated from code
+**Date:** 2026-10-27 · **By:**
+
+Chosen: `n_layers` / `d_model` / `n_heads` / `n_kv_heads` / `max_seq_len`, as
+in `src/slm/model/config.py`.
+
+Rejected: the HuggingFace-style names that were in the original
+`configs/model_mha.yaml` (`num_layers`, `hidden_size`,
+`num_attention_heads`, `max_position_embeddings`).
+
+Why: `config.py` is the only definition any code actually imports -- the old
+YAMLs were placeholders nothing read, so keeping two vocabularies bought
+nothing and invited drift. `configs/model_gqa.yaml` also had
+`num_key_value_groups: 2`, which is ambiguous: in HuggingFace's Llama code
+that name means the repeat factor (`n_heads // n_kv_heads`), so it reads as
+either 2 KV heads or 4. `n_kv_heads` states the head count directly, and the
+repeat factor is the derived property `n_rep`.
+
+Those two files are deleted. `configs/mha_baseline.yaml` and
+`configs/gqa_base.yaml` are now generated from the presets via
+`Config.to_yaml`, so they cannot drift from the code.
+
+### S7. GQA is parameter-matched to MHA by widening the FFN
+**Date:** 2026-10-27 · **By:**
+
+Chosen: GQA uses `ffn_hidden = 1664` (MHA keeps 1408). Both presets are then
+**27,795,968** parameters exactly.
+
+Rejected: (a) running GQA at its natural 24.65M and reporting perplexity
+against parameter count; (b) shrinking MHA to match.
+
+Why: GQA shrinks the K/V projections, which is where its memory saving comes
+from, but that also removes 3,145,728 parameters -- 11% of the model. Run
+unadjusted and a worse GQA perplexity has two candidate explanations, the
+architecture and the smaller capacity, with no way to separate them. Giving
+those parameters back in the feed-forward network equalises capacity while
+leaving the KV cache 4x smaller (8.4 MB vs 2.1 MB at seq 512, batch 1), so
+`n_kv_heads` is the only free variable.
+
+Honest caveat for the paper: this is no longer "the same model with GQA
+dropped in" but the same parameter budget spent differently. That is the
+more useful question anyway -- given a fixed budget, is it better spent on
+full attention, or on cheaper attention plus a wider FFN? -- but it must be
+stated rather than left for a reader to infer.
 
 ---
 

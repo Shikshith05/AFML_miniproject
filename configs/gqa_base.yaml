@@ -1,0 +1,64 @@
+run_name: gqa_base
+model:
+  vocab_size: 4096
+  d_model: 512
+  n_layers: 8
+  n_heads: 8
+  n_kv_heads: 2
+  ffn_hidden: 1664
+  max_seq_len: 512
+  rope_theta: 10000.0
+  rms_norm_eps: 1.0e-06
+  tie_embeddings: true
+  dropout: 0.0
+data:
+  dataset_name: roneneldan/TinyStories
+  tokenizer_path: artifacts/tokenizer
+  train_bin: data/train.bin
+  val_bin: data/val.bin
+  val_fraction: 0.01
+  max_train_tokens: null
+train:
+  micro_batch_size: 16
+  grad_accum_steps: 8
+  max_steps: 20000
+  warmup_ratio: 0.02
+  lr: 0.0003
+  min_lr_ratio: 0.1
+  weight_decay: 0.1
+  beta1: 0.9
+  beta2: 0.95
+  grad_clip: 1.0
+  precision: fp16
+  eval_interval: 500
+  checkpoint_interval: 1000
+  log_interval: 20
+  seed: 1337
+  deterministic_data_order: true
+  device: cuda
+  compile_model: false
+eval:
+  eval_batches: 50
+  prompts_path: data/eval_prompts.txt
+  max_new_tokens: 128
+  temperature: 0.8
+  top_k: 50
+  gen_seed: 42
+sft:
+  dataset_name: tatsu-lab/alpaca
+  max_instruction_tokens: 64
+  max_response_tokens: 192
+  lr: 2.0e-05
+  epochs: 2
+  micro_batch_size: 8
+  grad_accum_steps: 4
+  warmup_ratio: 0.03
+dpo:
+  beta: 0.1
+  lr: 5.0e-06
+  epochs: 1
+  micro_batch_size: 4
+  grad_accum_steps: 8
+  n_pairs: 3000
+  rejected_from_checkpoint: ''
+  ref_logprobs_cache: data/ref_logprobs.npz
