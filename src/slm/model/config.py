@@ -348,8 +348,18 @@ def mha_baseline() -> Config:
 
 
 def gqa_base() -> Config:
+    """GQA with 2 KV heads, parameter-matched to the MHA baseline.
+
+    GQA shrinks the K/V projections, which also removes ~3.15M parameters.
+    Comparing against MHA at that deficit would confound the attention
+    variant with model capacity. Widening ffn_hidden 1408 -> 1664 returns
+    exactly those parameters, so both presets are 27,795,968 params and the
+    only difference is how attention is structured. See O2 in
+    docs/decisions.md.
+    """
     cfg = Config(run_name="gqa_base")
     cfg.model.n_kv_heads = 2
+    cfg.model.ffn_hidden = 1664
     return cfg
 
 
