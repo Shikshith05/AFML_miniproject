@@ -17,25 +17,36 @@ projections and, more importantly, in the KV cache, which stores K and V
 
 from __future__ import annotations
 
-import inspect
-
 from typing import TYPE_CHECKING
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-# torch >= 2.5 can broadcast K/V across query groups inside SDPA, so GQA
-# needs no explicit expansion. Probed once rather than version-sniffed.
-_SDPA_HAS_GQA = "enable_gqa" in inspect.signature(
-    F.scaled_dot_product_attention
-).parameters
-
 from slm.model.config import ModelConfig
 from slm.model.layers import RotaryEmbedding
 
 if TYPE_CHECKING:
     from slm.model.kv_cache import KVCache
+
+
+def _probe_sdpa_gqa() -> bool:
+    """Does this torch's SDPA broadcast K/V across query groups itself?
+
+    torch >= 2.5 takes enable_gqa and does the grouping internally, with no
+    full-size copy of K/V. Probed by making the call rather than by checking
+    the version or the signature -- SDPA is a C builtin, so
+    inspect.signature() raises on it.
+    """
+    try:
+        q = torch.zeros(1, 2, 1, 8)   # 2 query heads
+        kv = torch.zeros(1, 1, 1, 8)  # 1 KV head -> needs grouping
+        F.scaled_dot_product_attention(q, kv, kv, enable_gqa=True)
+        return True
+    except (TypeError, RuntimeError):
+        return False
+
+
+_SDPA_HAS_GQA = _probe_sdpa_gqa()
 
 
 class Attention(nn.Module):
