@@ -162,7 +162,11 @@ def test_kv_cache_rejects_overflow():
 # Worked out by hand in docs/person_b_notes.md.
 HAND_COUNTS = {
     8: {"total": 27_795_968, "embedding": 2_097_152, "non_embedding": 25_698_816},  # MHA
-    2: {"total": 24_650_240, "embedding": 2_097_152, "non_embedding": 22_553_088},  # GQA-2
+    # GQA-2 with ffn_hidden widened 1408 -> 1664 (decision S7). Same totals as
+    # MHA by design: shrinking K/V saves 2 * 512 * (512 - 128) = 393,216 params
+    # per layer, and widening the FFN adds 3 * 512 * (1664 - 1408) = 393,216.
+    # (24,650,240 was the count before the widening.)
+    2: {"total": 27_795_968, "embedding": 2_097_152, "non_embedding": 25_698_816},
 }
 
 
