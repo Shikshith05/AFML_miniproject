@@ -9,10 +9,10 @@ The variant is set by ModelConfig.n_kv_heads alone:
     n_kv_heads == 1            -> MQA  (all query heads share one K/V)
 
 Q is projected to n_heads * head_dim, but K and V only to
-n_kv_heads * head_dim. K and V are then repeated n_rep = n_heads // n_kv_heads
-times so the attention maths is ordinary MHA. The saving is in the K/V
-projections and, more importantly, in the KV cache, which stores K and V
-*before* the repeat.
+n_kv_heads * head_dim. Each K/V head then serves n_rep = n_heads // n_kv_heads
+query heads: SDPA's enable_gqa does this internally, and on torch without it
+K and V are repeated n_rep times first. The saving is in the K/V projections
+and, more importantly, in the KV cache, which stores K and V at n_kv_heads.
 """
 
 from __future__ import annotations
@@ -99,7 +99,7 @@ class Attention(nn.Module):
         q, k = self.rope(q, k, start_pos)
 
         if kv_cache is not None:
-            # Cache stores K/V at n_kv_heads -- before the repeat below -- which
+            # Cache stores K/V at n_kv_heads, never expanded to n_heads, which
             # is where GQA's memory saving comes from. Returns every K/V so far.
             k, v = kv_cache.update(layer_idx, start_pos, k, v)                         # [B, H_kv, T, hd]
             k, v = k.to(q.dtype), v.to(q.dtype)
@@ -107,9 +107,10 @@ class Attention(nn.Module):
         # Every query head needs a K/V head. enable_gqa lets SDPA broadcast
         # the n_kv_heads K/V across their query groups internally, with no
         # full-size copy. repeat_interleave here instead would materialise
-        # [B, n_heads, T, hd] on EVERY decode step -- at batch 64, ctx 2048
-        # that is ~2.2 GB written per generated token, which costs more than
-        # the smaller cache saves (measured: up to -52% decode throughput).
+        # [B, n_heads, T, hd] on EVERY decode step -- at batch 64, ctx 2048,
+        # fp16, 8 layers that is 2.15 GB written per generated token, which
+        # costs more than the smaller cache saves (T4 benchmark on that path:
+        # GQA decode 52% below MHA at batch 64, ctx 2048).
         # Fallback keeps the old path for torch < 2.5.
         T_pre = k.size(2)
         if self.n_rep > 1 and not _SDPA_HAS_GQA:
