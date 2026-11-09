@@ -57,11 +57,12 @@ def param_breakdown(model: nn.Module) -> dict[str, int]:
 def matched_ffn_hidden(cfg: ModelConfig, reference: ModelConfig) -> int:
     """ffn_hidden that gives `cfg` the same total parameters as `reference`.
 
-    For the ablation's option O2: GQA's smaller K/V projections leave it with
-    fewer parameters than MHA; spend the difference on the FFN. Each extra
-    hidden unit adds 3 * d_model weights per layer (w_gate, w_up, w_down).
-    Rounded to the nearest unit, so the match is exact only when the gap
-    divides evenly -- it does for the project's MHA vs GQA-2 presets.
+    How the GQA preset's width was picked (decision S7): GQA's smaller K/V
+    projections leave it with fewer parameters than MHA; spend the difference
+    on the FFN. Each extra hidden unit adds 3 * d_model weights per layer
+    (w_gate, w_up, w_down). Rounded to the nearest unit, so the match is exact
+    only when the gap divides evenly -- it does for MHA vs GQA-2, where
+    ffn_hidden goes 1408 -> 1664.
     """
     gap = reference.param_counts()["total"] - cfg.param_counts()["total"]
     per_unit = 3 * cfg.d_model * cfg.n_layers
@@ -84,9 +85,11 @@ if __name__ == "__main__":
     from slm.model.transformer import Transformer
 
     mha, gqa = mha_baseline().model, gqa_base().model
-    matched = dataclasses.replace(gqa, ffn_hidden=matched_ffn_hidden(gqa, mha))
+    # The GQA preset is already matched (S7); show the width it started from.
+    unmatched = dataclasses.replace(gqa, ffn_hidden=mha.ffn_hidden)
+    matched = dataclasses.replace(gqa, ffn_hidden=matched_ffn_hidden(unmatched, mha))
     print(compare({
         "MHA": Transformer(mha),
-        "GQA-2": Transformer(gqa),
+        f"GQA-2 ffn={unmatched.ffn_hidden}": Transformer(unmatched),
         f"GQA-2 ffn={matched.ffn_hidden}": Transformer(matched),
     }))
