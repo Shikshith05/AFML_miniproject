@@ -162,7 +162,7 @@ def test_kv_cache_rejects_overflow():
 # Worked out by hand in docs/person_b_notes.md.
 HAND_COUNTS = {
     8: {"total": 27_795_968, "embedding": 2_097_152, "non_embedding": 25_698_816},  # MHA
-    2: {"total": 24_650_240, "embedding": 2_097_152, "non_embedding": 22_553_088},  # GQA-2
+    2: {"total": 27_795_968, "embedding": 2_097_152, "non_embedding": 25_698_816},  # GQA-2, ffn 1664 (S7)
 }
 
 
