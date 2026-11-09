@@ -1,8 +1,12 @@
 # Person B notes — Phase 2: model, attention, tests
 
-Branch `track/model` (from `main`, not pushed). Status on 2026-10-24: **all
-files written, 28/28 tests passing** (`.venv\Scripts\python.exe -m pytest -q`,
-about 13 s on CPU).
+Merged into `main`. Final checks 2026-11-09 on torch 2.14.1 (CPU): **33/33
+track B tests passing** in about 20 s (`python -m pytest -q
+tests/test_attention.py tests/test_model.py`). Whole repo: 70 passed, 1 skipped
+(the CUDA-only tokenizer test).
+
+Final model: both variants have **27,795,968 parameters**. MHA is 8 KV heads,
+`ffn_hidden` 1408. GQA is 2 KV heads, `ffn_hidden` 1664 (decision S7).
 
 | Commit | What |
 |---|---|
@@ -13,6 +17,7 @@ about 13 s on CPU).
 | `1d57293` | kv_cache.py + cache tests |
 | `076dbbc` | utils/params.py + parameter-count tests |
 | `d104c8f` | overfit test |
+| `5951d91`, `6459608` | attention.py: `enable_gqa` path and probe (track C, 6 Nov) |
 
 How the pieces fit together:
 
@@ -35,12 +40,11 @@ During generation, each Attention layer also reads and writes a `KVCache`
 
 ## 1. File by file
 
-### `src/slm/model/config.py` — not ours, copied
+### `src/slm/model/config.py` — not ours, shared
 
 **What it does:** holds every hyperparameter for the whole project. Person C
-wrote it on `track/training`; our branch has a byte-identical copy so the model
-can import `ModelConfig`. **Never edit it here** — suggested changes are in
-section 4.
+wrote it and it is now one shared file on `main`. Track B only reads it;
+suggested changes are in section 4.
 
 **Fields the model uses:** `vocab_size, d_model, n_layers, n_heads,
 n_kv_heads, ffn_hidden, max_seq_len, rope_theta, rms_norm_eps,
@@ -71,7 +75,9 @@ return self.dropout(self.w_down(F.silu(self.w_gate(x)) * self.w_up(x)))
 
 Three matrices instead of the classic two, so the hidden size shrinks from
 4 × 512 to 8/3 × 512 ≈ 1365, rounded up to 1408. That keeps the parameter count
-about the same (3 × 512 × 1408 = 2.16M, against 2 × 512 × 2048 = 2.10M).
+about the same (3 × 512 × 1408 = 2.16M, against 2 × 512 × 2048 = 2.10M). That
+is the default and MHA's value. The GQA preset uses 1664 to match MHA's total
+parameters (S7, section 3).
 
 **RoPE (rotary position embeddings)** — *how attention knows token order.*
 Attention on its own can't tell "dog bites man" from "man bites dog". RoPE
@@ -110,28 +116,36 @@ self.q_proj = nn.Linear(d_model, n_heads    * head_dim, bias=False)  # 512 → 5
 self.k_proj = nn.Linear(d_model, n_kv_heads * head_dim, bias=False)  # 512 → 128 for GQA-2
 self.v_proj = nn.Linear(d_model, n_kv_heads * head_dim, bias=False)
 ...
-if self.n_rep > 1:                                   # n_rep = n_heads // n_kv_heads
+if self.n_rep > 1 and not _SDPA_HAS_GQA:             # fallback, torch without enable_gqa
     k = k.repeat_interleave(self.n_rep, dim=1)       # [B, 2, T, 64] → [B, 8, T, 64]
     v = v.repeat_interleave(self.n_rep, dim=1)
+gqa_kw = {"enable_gqa": True} if (self.n_rep > 1 and _SDPA_HAS_GQA) else {}
 ```
 
-After the repeat, the maths is plain MHA. With `n_kv_heads == n_heads`,
-`n_rep = 1`, the repeat is skipped, and the class *is* standard MHA (tested
-against a reference). `repeat_interleave` gives 0,0,0,0,1,1,1,1, i.e. each
-group is contiguous. Plain `repeat` would give 0,1,0,1,… which is a different
-(wrong) grouping, and a test catches it.
+Each K/V head has to serve `n_rep = n_heads // n_kv_heads` query heads. With
+`enable_gqa=True`, SDPA does that grouping itself and we pass K/V at 2 heads.
+`_probe_sdpa_gqa` decides this at import by making a real SDPA call, because
+SDPA is a C builtin and `inspect.signature` raises on it. On torch without the
+argument, `repeat_interleave` expands K/V first and the rest is plain MHA.
+
+Both paths give the same grouping: 0,0,0,0,1,1,1,1, each group contiguous.
+Plain `repeat` would give 0,1,0,1,… which is a different (wrong) grouping, and
+a test catches it in the fallback. With `n_kv_heads == n_heads`, `n_rep = 1`,
+neither path applies, and the class *is* standard MHA (tested against a
+reference).
 
 **The other important lines:**
 
 ```python
 q, k = self.rope(q, k, start_pos)                    # position goes in here, Q and K only
 if kv_cache is not None:
-    k, v = kv_cache.update(layer_idx, start_pos, k, v)   # stored BEFORE the repeat
+    k, v = kv_cache.update(layer_idx, start_pos, k, v)   # stored at n_kv_heads, never expanded
 ...
 if T == S:                                           # normal forward
-    out = F.scaled_dot_product_attention(q, k, v, is_causal=True, ...)
+    out = F.scaled_dot_product_attention(q, k, v, is_causal=True, ..., **gqa_kw)
 else:                                                # cached: queries are the LAST S of T
     mask = torch.ones(S, T, dtype=torch.bool).tril(diagonal=T - S)
+    out = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, ..., **gqa_kw)
 ```
 
 ### `src/slm/model/transformer.py` — the block and the full model
@@ -181,7 +195,7 @@ self.k = torch.zeros(shape, ...)
 self.v = torch.zeros(shape, ...)
 ```
 
-K/V are stored *before* the repeat, so GQA-2 needs 4× less cache than MHA. At
+K/V are stored at `n_kv_heads`, so GQA-2 needs 4× less cache than MHA. At
 512 tokens in fp16, that's 2.10 MB against 8.39 MB per sequence.
 
 How generation uses it (the same pattern appears in the cached-generation test):
@@ -205,14 +219,17 @@ checks the other. Run `python -m slm.utils.params` for the table in section 3.
   yields the tied matrix once, so it is counted once.
 - `param_breakdown(model)` → per component (embedding, attention, ffn, norms).
 - `matched_ffn_hidden(gqa_cfg, mha_cfg)` → the `ffn_hidden` that gives GQA
-  the same total as MHA. **It's 1664, and the match is exact** (see section 4).
+  the same total as MHA. Starting from 1408, **it's 1664, and the match is
+  exact** (S7, section 3). The preset already uses 1664.
 
 ### Tests — `tests/test_attention.py`, `tests/test_model.py`
 
 All of them use random token IDs (`torch.randint(0, 4096, (2, 16))`), so none
 need the tokenizer. Each was also checked to **fail** on a deliberately broken
-model: no causal mask, `repeat` instead of `repeat_interleave`, and RoPE
-ignoring `start_pos` were each caught.
+model. Re-run on the final code (2026-11-09): no causal mask, `repeat` instead
+of `repeat_interleave` in the fallback, `enable_gqa` missing on the cached
+branch, a cached mask without the `T − S` offset, and RoPE ignoring `start_pos`
+were each caught.
 
 ---
 
@@ -220,13 +237,13 @@ ignoring `start_pos` were each caught.
 
 | # | Picked | Alternatives | Why |
 |---|---|---|---|
-| 1 | Copy C's config.py verbatim onto this branch (own commit) | Branch off `track/training`; wait for her merge | Lets us import `ModelConfig` now. An identical file merges cleanly, and if she edits hers first we take her version. |
+| 1 | Copy C's config.py verbatim onto this branch (own commit) | Branch off `track/training`; wait for her merge | Let us import `ModelConfig` during Phase 2. Merged since; there is now one config.py on `main`. |
 | 2 | RoPE "half-split" pairing (feature *i* with *i*+32) via `rotate_half` | Adjacent pairs (0,1),(2,3) as in the paper; complex numbers as in Meta's Llama | Same maths up to a fixed reordering. It matches HuggingFace Llama, uses only real tensors, and complex numbers don't mix well with fp16 autocast. |
 | 3 | One RoPE table per Attention layer | One shared table owned by Transformer | Attention works and can be tested on its own. Cost: about 260 KB per layer, 2 MB total. |
 | 4 | RoPE cos/sin as `persistent=False` buffers | Normal buffers; recompute every forward | They move with `.to(device)` but stay out of checkpoints, since they can always be rebuilt. |
 | 5 | fp32 maths inside RMSNorm and RoPE, cast back after | Whatever dtype comes in | C trains in fp16 on a T4. Squaring activations in fp16 overflows past 65,504. |
 | 6 | `F.scaled_dot_product_attention` (fused) | Hand-written softmax | Faster and lower-memory. The hand-written version lives in the test as the reference. |
-| 7 | `repeat_interleave` to expand K/V (as asked) | `expand`+`reshape`; SDPA's `enable_gqa=True` | Requested, and clearest to read. Alternatives avoid the copy; worth trying only if the benchmark needs speed. |
+| 7 | SDPA's `enable_gqa=True` when torch supports it (`_probe_sdpa_gqa`), `repeat_interleave` as the fallback for older torch | `repeat_interleave` always (the original code); `expand`+`reshape` | Changed by track C on 6 Nov. `repeat_interleave` copied K/V to full size on every decode step: 2.15 GB written per generated token at batch 64, context 2048, fp16. In the T4 benchmark of that path, GQA decode was below MHA by 48 % at batch 64, context 1024 and by 52 % at context 2048. Same output on both paths (tested on CPU), and no weights changed, so the trained checkpoints are unaffected. |
 | 8 | Explicit offset mask when the cache already holds tokens | Always `is_causal=True` | `is_causal` aligns the mask to the top-left, which is wrong when the queries are the last S of T keys. Needed for multi-token chunks on a non-empty cache. |
 | 9 | Dropout on embedding, attention probs, attention output, FFN output | Fewer places | The usual GPT-2 placement. `dropout = 0.0` in the config, so it is inactive anyway. |
 | 10 | GPT-2 init: N(0, 0.02), residual projections scaled by 1/√(2·n_layers) | PyTorch defaults | The default embedding is N(0, 1): tied logits would be about 22 wide at step 0. Measured initial loss with our init: 8.33, against ln(4096) = 8.32 (ideal). |
@@ -240,7 +257,7 @@ ignoring `start_pos` were each caught.
 | 18 | Overfit model: d_model 64, 2 layers, 4 heads, **2 KV heads**, lr 3e-3, 300 steps, pass if loss < 0.05 and every token recalled | lr 1e-2 (also works) | GQA path exercised; smoother curve; ~2 s. Reaches 0.004, so the threshold has margin. |
 | 19 | "Non-embedding" excludes the token embedding (and an untied lm_head), counts the final norm | Other definitions | Matches C's `param_counts()` exactly. |
 | 20 | Named it `count_params` | `count_parameters` | C's `training/utils.py` already has a `count_parameters`; avoids confusion. |
-| 21 | Didn't write `generation/generate.py` | Write it | Not in the Phase 2 list, and probably another track's. The test contains a minimal greedy loop to copy from. |
+| 21 | Didn't write `generation/generate.py` (still only a docstring on `main`) | Write it | Not in the Phase 2 list, and probably another track's. The test contains a minimal greedy loop to copy from. |
 | 22 | No new config fields | Ask C for `init_std` etc. | Nothing needed; the 0.02 init scale is a constant in transformer.py. |
 
 ---
@@ -248,11 +265,14 @@ ignoring `start_pos` were each caught.
 ## 3. Test results
 
 ```
-tests/test_attention.py   6 passed
+tests/test_attention.py  11 passed
   mha_matches_reference                 n_kv_heads=8 output == naive per-head MHA (allclose)
   gqa_equals_mha_with_shared_kv_weights GQA-2 == MHA whose K/V heads are copied in groups
   variants_shapes [MHA, GQA-2, MQA]     projection sizes and output shape
   rope_score_depends_only_on_relative_position
+  enable_gqa_matches_repeat_interleave_fallback [8, 4, 2, 1]
+                                        both paths forced; forward, prefill, cached steps
+  probe_reports_false_on_torch_without_enable_gqa
 tests/test_model.py      22 passed
   output_shape [8, 2, 1]                (2, 16, 4096), finite
   causality [t = 1, 7, 15]              logits before t unchanged; at/after t changed
@@ -265,12 +285,13 @@ tests/test_model.py      22 passed
   param_breakdown_matches_config_per_component [MHA, GQA]
   matched_ffn_hidden_equalises_gqa_with_mha
   tiny_model_memorises_one_batch
-28 passed in ~13 s
+33 passed in ~20 s
 ```
 
 ### Parameter counts — the hand calculation
 
-Settings: d_model 512, n_heads 8, head_dim 64, ffn_hidden 1408, vocab 4096, 8 layers.
+Settings: d_model 512, n_heads 8, head_dim 64, vocab 4096, 8 layers. `ffn_hidden`
+is 1408 for MHA and 1664 for GQA.
 A linear layer from *a* to *b* features (no bias) has *a × b* weights.
 
 | Per layer | MHA (n_kv_heads = 8) | GQA (n_kv_heads = 2) |
@@ -280,28 +301,31 @@ A linear layer from *a* to *b* features (no bias) has *a × b* weights.
 | v_proj | 512 × (8·64) = 262,144 | 512 × (**2**·64) = 65,536 |
 | o_proj | (8·64) × 512 = 262,144 | 262,144 |
 | **attention** | **1,048,576** | **655,360** |
-| w_gate, w_up, w_down | 3 × 512 × 1408 = 2,162,688 | 2,162,688 |
+| w_gate, w_up, w_down | 3 × 512 × 1408 = 2,162,688 | 3 × 512 × **1664** = 2,555,904 |
 | 2 RMSNorm gains | 2 × 512 = 1,024 | 1,024 |
-| **per layer** | **3,212,288** | **2,819,072** |
+| **per layer** | **3,212,288** | **3,212,288** |
 
 | Whole model | MHA | GQA |
 |---|---|---|
-| 8 layers | 25,698,304 | 22,552,576 |
+| 8 layers | 25,698,304 | 25,698,304 |
 | + final RMSNorm | 512 | 512 |
-| **= non-embedding** | **25,698,816** | **22,553,088** |
+| **= non-embedding** | **25,698,816** | **25,698,816** |
 | + embedding 4096 × 512 | 2,097,152 | 2,097,152 |
 | + lm_head (tied) | 0 | 0 |
-| **= total** | **27,795,968** (27.80M) | **24,650,240** (24.65M) |
-| embedding share | 7.5 % | 8.5 % |
+| **= total** | **27,795,968** (27.80M) | **27,795,968** (27.80M) |
+| embedding share | 7.5 % | 7.5 % |
 
-The gap is 3,145,728 = 8 layers × 2 matrices (K, V) × 512 × (512 − 128).
+Why GQA was widened (S7): at `ffn_hidden` 1408 it would have 24,650,240
+parameters, 3,145,728 fewer than MHA = 8 layers × 2 matrices (K, V) × 512 ×
+(512 − 128). Per layer the K/V projections lose 393,216 weights, and 256 more
+hidden units give back 3 × 512 × 256 = 393,216, so the match is exact.
 The model's own count (`count_params`), C's formula (`param_counts()`) and
 the hand calculation all agree exactly.
 
 `python -m slm.utils.params`:
 
 ```
-                           MHA           GQA-2  GQA-2 ffn=1664
+                           MHA  GQA-2 ffn=1408  GQA-2 ffn=1664
 embedding            2,097,152       2,097,152       2,097,152
 attention            8,388,608       5,242,880       5,242,880
 ffn                 17,301,504      17,301,504      20,447,232
@@ -346,25 +370,18 @@ contract `model(x) → logits` works as she expects.
 
 ---
 
-## 4. For the kickoff (Sat 25 Oct)
+## 4. Kickoff items (25 Oct) and where they ended up
 
-1. **O1 — field naming.** The model reads `n_layers, d_model, n_heads,
-   n_kv_heads, ffn_hidden, max_seq_len, rope_theta, rms_norm_eps,
-   tie_embeddings, dropout` (plus `head_dim`, `n_rep`). Config is only read in
-   constructors, so if we switch to HuggingFace names, renaming is about 30
-   lines across attention.py, transformer.py, kv_cache.py and params.py. Either way,
-   `configs/model_mha.yaml` / `model_gqa.yaml` on `main` still use HF names and
-   must be converted. `num_key_value_groups: 2` is ambiguous: it should become
-   `n_kv_heads: 2`.
+1. **O1 — field naming. Settled as S6.** Research-code names
+   (`n_layers, d_model, n_heads, n_kv_heads, …`). The old HF-named
+   `configs/model_mha.yaml` / `model_gqa.yaml` are deleted, and
+   `configs/mha_baseline.yaml` / `gqa_base.yaml` are generated from the presets.
 
-2. **O2 — parameter fairness. There is a clean option-2 number.** Setting GQA's
-   `ffn_hidden = 1664` (1408 + 256) gives **exactly** MHA's 27,795,968
-   parameters, and 1664 = 13 × 128, so it stays aligned like C's
-   `round_to_multiple`. Trade-off to state in the paper: the matched GQA moves
-   capacity from attention into the FFN. Suggestion: run MHA vs GQA-2 at equal
-   settings (the planned ablation), and report the parameter gap next to
-   perplexity. If there is time, a matched GQA-2 run makes the comparison
-   airtight. Option 3 in decisions.md.
+2. **O2 — parameter fairness. Settled as S7.** GQA uses `ffn_hidden = 1664`
+   (1408 + 256), which gives **exactly** MHA's 27,795,968 parameters, and
+   1664 = 13 × 128, so it stays aligned like C's `round_to_multiple`. Trade-off
+   to state in the paper: the matched GQA moves capacity from attention into
+   the FFN.
 
 3. **Notes on config.py for Person C** (suggestions only, not changed):
    - The presets do `cfg.model.n_kv_heads = …` *after* construction, so
@@ -388,15 +405,29 @@ contract `model(x) → logits` works as she expects.
    `test_cached_generation_matches_uncached` is a working template.
 
 5. **For the attention benchmark:** GQA's saving in this code is in *memory*
-   (K/V projections and, above all, the KV cache), not attention FLOPs.
-   `repeat_interleave` rebuilds full-size K/V before the matmul, so attention
-   compute is the same as MHA. Measure cache memory and decode tokens/s at
-   large batch × long sequence, where memory bandwidth dominates. Expect little
-   speed difference at batch 1 on short sequences.
+   (K/V projections and, above all, the KV cache), not attention FLOPs: all 8
+   query heads are still scored against every key. `results/benchmark/benchmark.json`
+   (T4, fp16) was committed on 1 Nov, **before** the `enable_gqa` change, so it
+   measures the `repeat_interleave` path. GQA vs MHA decode tokens/s there:
 
-6. **Merging:** `track/model`'s config.py is byte-identical to
-   `track/training`'s. Merging either branch first is clean. If C changes
-   config.py before merging, resolve by taking her version.
+   | batch × context | MHA | GQA | GQA vs MHA |
+   |---|---|---|---|
+   | 1 × 2048 | 86.5 | 88.9 | +2.8 % |
+   | 16 × 2048 | 1,289 | 1,293 | +0.3 % |
+   | 64 × 128 | 5,588 | 4,841 | −13.4 % |
+   | 64 × 512 | 5,695 | 5,026 | −11.7 % |
+   | 64 × 1024 | 5,441 | 2,821 | −48.2 % |
+   | 64 × 2048 | 3,386 | 1,632 | −51.8 % |
+
+   GQA also has the wider FFN (1664 against 1408), and the benchmark can't
+   separate that from the copy, so the −12 to −13 % at batch 64 and short
+   context shouldn't be put down to the copy alone.
+   **`enable_gqa` has not been re-benchmarked on the T4.** On CPU (torch 2.14.1),
+   one SDPA call at batch 64, context 2048 took 6.7 ms with `enable_gqa` against
+   64 ms with `repeat_interleave`. That says nothing about the T4.
+
+6. **Merging:** done. `track/model`, `track/training` and `track/tokenizer` are
+   all in `main`.
 
 7. `ROADMAP.md` isn't in the repo. Worth adding so everyone works from the same plan.
 
@@ -406,22 +437,23 @@ contract `model(x) → logits` works as she expects.
 
 1. **What does `n_kv_heads` control, and how do you know `n_kv_heads = n_heads`
    is real MHA?** It's the number of K/V heads. Query heads are split into
-   groups that share one K/V head. When it equals `n_heads`, `n_rep = 1`, the
-   repeat is skipped, and `test_mha_matches_reference` shows the output equals a
+   groups that share one K/V head. When it equals `n_heads`, `n_rep = 1`, no
+   grouping happens, and `test_mha_matches_reference` shows the output equals a
    textbook per-head MHA.
 
 2. **Where exactly does GQA save memory, and does it save compute?** The K/V
    projections shrink (8.39M → 5.24M attention parameters in total), and the KV
    cache shrinks 4× (8.39 → 2.10 MB at 512 tokens). Attention compute does not
-   shrink here, because K/V are repeated back to 8 heads before the matmul. The
-   win comes during generation, where reading the cache from memory is the
-   bottleneck.
+   shrink, because all 8 query heads are still scored against every key. S7
+   gives the saved parameters back to the FFN, so GQA's total is the same as
+   MHA's. The remaining saving is cache memory during generation.
 
-3. **Where do 27.80M and 24.65M come from?** Per layer: 4 attention matrices
-   (K and V are 512×128 in GQA instead of 512×512), 3 FFN matrices of
-   512×1408, and 2 norm vectors. Multiply by 8 layers, add the final norm and
-   the 4096×512 embedding, and add nothing for the tied head. The difference is
-   8 × 2 × 512 × 384 = 3,145,728.
+3. **Where does 27,795,968 come from, and why does 24.65M appear?** Per layer:
+   4 attention matrices (K and V are 512×128 in GQA instead of 512×512), 3 FFN
+   matrices (512×1408 for MHA, 512×1664 for GQA), and 2 norm vectors. Multiply
+   by 8 layers, add the final norm and the 4096×512 embedding, and add nothing
+   for the tied head. GQA at 1408 would be 24.65M, short by
+   8 × 2 × 512 × 384 = 3,145,728. Widening by 256 returns exactly that (S7).
 
 4. **Why RoPE rather than learned position embeddings?** No parameters, and the
    attention score depends only on relative distance (m − n), which is what
@@ -439,9 +471,11 @@ contract `model(x) → logits` works as she expects.
    is stable without delicate warmup. RMSNorm drops LayerNorm's mean-centring
    and bias: fewer operations, and the same quality in practice (Llama uses it).
 
-7. **Why is `ffn_hidden` 1408 and not 2048?** SwiGLU has three matrices, not
-   two. 8/3 × 512 ≈ 1365 keeps the FFN parameter count close to a classic
-   4 × 512 two-matrix FFN; rounding up to 1408 (11 × 128) suits GPU matmuls.
+7. **Why is `ffn_hidden` 1408 and not 2048, and why is GQA's 1664?** SwiGLU has
+   three matrices, not two. 8/3 × 512 ≈ 1365 keeps the FFN parameter count close
+   to a classic 4 × 512 two-matrix FFN; rounding up to 1408 (11 × 128) suits GPU
+   matmuls. GQA's 1664 (13 × 128) is that plus 256, to spend the parameters saved
+   on K/V (S7).
 
 8. **What is weight tying, and what does it save?** The output head reuses the
    embedding matrix. That saves 2,097,152 parameters (7.5% of MHA) and forces
@@ -465,3 +499,13 @@ contract `model(x) → logits` works as she expects.
     would hide keys they are allowed to see. The offset mask
     `tril(diagonal=T−S)` fixes that, and `test_chunked_prefill_matches_full_forward`
     checks it.
+
+12. **Why `enable_gqa` instead of `repeat_interleave`, and does the answer
+    change?** `repeat_interleave` copied K/V to all 8 heads on every decode step,
+    2.15 GB per generated token at batch 64, context 2048, fp16, which threw away
+    the benefit of the small cache: in the T4 benchmark GQA decoded 52 % slower
+    than MHA there. `enable_gqa` lets SDPA group the heads without us making that
+    copy. The output is the same: `test_enable_gqa_matches_repeat_interleave_fallback`
+    forces both paths on the same weights and compares forward and cached steps
+    (CPU). The benchmark predates the change, so the speed-up on the T4 is not
+    measured.
