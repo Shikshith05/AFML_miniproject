@@ -207,10 +207,18 @@ sufficient alone.
 Alpaca is model-generated (text-davinci-003); the TA advised against
 synthetic data. `--dataset dolly` (Dolly-15k, human-written) and
 `--dataset oasst1` (OpenAssistant, first-turn top-ranked English replies)
-are implemented. Default run uses Dolly pending the TA's answer.
+are implemented.
 
-- Decision:
-- Rationale:
+- Decision (2026-11-09, Suhas): use the existing Alpaca SFT checkpoint
+  (`gqa_sft/final.pt`, run by Mythri, Kaggle notebook60e6ad04ff) and proceed
+  to DPO. That run: code at `6459608` (same template and masking as the DPO
+  pairs), started from `gqa_base/final.pt`, 45,379 of 52,002 Alpaca examples
+  kept, 2 epochs at lr 2e-5, val loss 4.21 -> 2.50 (ppl 67.7 -> 12.2).
+- Rationale: the TA was asked which human-written dataset to use but had
+  not replied by 9 Nov, and the deadline is 15 Nov. Re-running SFT on Dolly
+  or oasst1 remains a one-flag change (`--dataset`) if time allows.
+- Limitation to state in the write-up: Alpaca is model-generated
+  (text-davinci-003), which the TA advised against.
 
 ---
 
