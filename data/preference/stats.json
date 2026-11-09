@@ -1,0 +1,10 @@
+{
+  "chosen_mean_tokens": 132.93,
+  "rejected_mean_tokens": 137.09966666666668,
+  "n_pairs": 3000,
+  "weak_checkpoint": "checkpoints/gqa_base/step_002000.pt",
+  "weak_step": 2000,
+  "temperature": 1.0,
+  "top_k": 50,
+  "prefix_tokens": 48
+}
