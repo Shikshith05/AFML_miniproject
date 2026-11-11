@@ -4,10 +4,14 @@ import math
 
 import pytest
 import torch
+import torch.nn.functional as F
 
+from slm.model import attention
 from slm.model.attention import Attention
 from slm.model.config import ModelConfig
+from slm.model.kv_cache import KVCache
 from slm.model.layers import RotaryEmbedding, apply_rotary
+from slm.model.transformer import Transformer
 
 
 def reference_mha(attn: Attention, x: torch.Tensor) -> torch.Tensor:
@@ -106,3 +110,74 @@ def test_rope_score_depends_only_on_relative_position():
     assert not torch.allclose(score(5, 2), score(5, 4), atol=1e-3)
     # a rotation never changes a vector's length
     torch.testing.assert_close(rope(q, q, start_pos=300)[0].norm(), q.norm())
+
+
+# --------------------------------------------------------------------------
+# enable_gqa path vs repeat_interleave fallback
+# --------------------------------------------------------------------------
+
+# Prefill on an empty cache (T == S, is_causal branch), then one decode step
+# and a 3-token chunk on a non-empty cache (T > S, attn_mask branch).
+CHUNKS = ((0, 8), (8, 9), (9, 12))
+
+
+@pytest.mark.parametrize("n_kv_heads", [8, 4, 2, 1])
+@torch.no_grad()
+def test_enable_gqa_matches_repeat_interleave_fallback(monkeypatch, n_kv_heads):
+    """Same weights and tokens through both K/V expansion paths must agree,
+    on the plain forward pass and on every cached step.
+
+    The module flag is forced for each run. A spy on SDPA checks which path
+    actually ran, so the comparison cannot pass by running one path twice.
+    """
+    if not attention._SDPA_HAS_GQA:
+        pytest.skip("this torch has no enable_gqa")
+
+    torch.manual_seed(0)
+    model = Transformer(ModelConfig(n_kv_heads=n_kv_heads)).eval()
+    x = torch.randint(0, 4096, (2, 12))
+
+    calls = []
+    real_sdpa = F.scaled_dot_product_attention
+
+    def spy(q, k, v, **kw):
+        calls.append((k.size(1), kw.get("enable_gqa", False), "attn_mask" in kw))
+        return real_sdpa(q, k, v, **kw)
+
+    monkeypatch.setattr(F, "scaled_dot_product_attention", spy)
+
+    def run(use_enable_gqa: bool) -> tuple[torch.Tensor, torch.Tensor]:
+        monkeypatch.setattr(attention, "_SDPA_HAS_GQA", use_enable_gqa)
+        calls.clear()
+        full = model(x)
+        cache = KVCache(model.cfg, batch_size=2)
+        steps = [model(x[:, a:b], kv_cache=cache) for a, b in CHUNKS]
+        return full, torch.cat(steps, dim=1)
+
+    def check_calls(kv_heads_seen: int, flag: bool) -> None:
+        n = model.cfg.n_layers
+        # full forward + prefill are unmasked; the two later chunks are masked
+        assert calls == [(kv_heads_seen, flag, False)] * (2 * n) + [(kv_heads_seen, flag, True)] * (2 * n)
+
+    gqa_full, gqa_cached = run(use_enable_gqa=True)
+    check_calls(n_kv_heads, flag=n_kv_heads < 8)  # MHA never needs the flag
+
+    repeat_full, repeat_cached = run(use_enable_gqa=False)
+    check_calls(8, flag=False)  # K/V already expanded to all 8 query heads
+
+    torch.testing.assert_close(gqa_full, repeat_full, atol=1e-5, rtol=1e-4)
+    torch.testing.assert_close(gqa_cached, repeat_cached, atol=1e-5, rtol=1e-4)
+    # The cached steps must also reproduce the uncached logits on each path.
+    torch.testing.assert_close(gqa_cached, gqa_full, atol=1e-5, rtol=1e-4)
+    torch.testing.assert_close(repeat_cached, repeat_full, atol=1e-5, rtol=1e-4)
+
+
+def test_probe_reports_false_on_torch_without_enable_gqa(monkeypatch):
+    """Older torch rejects the keyword with TypeError; the probe must turn
+    that into False so Attention takes the fallback."""
+
+    def old_sdpa(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False):
+        raise AssertionError("unreachable: enable_gqa is not in this signature")
+
+    monkeypatch.setattr(F, "scaled_dot_product_attention", old_sdpa)
+    assert attention._probe_sdpa_gqa() is False

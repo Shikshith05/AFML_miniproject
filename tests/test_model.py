@@ -198,9 +198,13 @@ def test_param_breakdown_matches_config_per_component(preset):
 
 def test_matched_ffn_hidden_equalises_gqa_with_mha():
     mha, gqa = mha_baseline().model, gqa_base().model
-    ffn = matched_ffn_hidden(gqa, mha)
-    assert ffn == 1664  # 1408 + 256
-    matched = dataclasses.replace(gqa, ffn_hidden=ffn)
+    # The preset is already matched (S7), so its gap is 0 and would prove
+    # nothing. Start from the width GQA had before widening.
+    unmatched = dataclasses.replace(gqa, ffn_hidden=mha.ffn_hidden)
+    assert count_params(Transformer(unmatched))["total"] == 24_650_240
+    ffn = matched_ffn_hidden(unmatched, mha)
+    assert ffn == gqa.ffn_hidden == 1664  # 1408 + 256
+    matched = dataclasses.replace(unmatched, ffn_hidden=ffn)
     assert count_params(Transformer(matched))["total"] == HAND_COUNTS[8]["total"]
 
 

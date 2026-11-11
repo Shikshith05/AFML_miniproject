@@ -53,9 +53,9 @@ class SwiGLU(nn.Module):
     """Feed-forward block: w_down( silu(w_gate(x)) * w_up(x) ).
 
     The silu(w_gate(x)) branch is a soft per-unit gate on w_up(x). Three
-    matrices instead of the classic two, which is why ffn_hidden is
-    8/3 * d_model rather than 4 * d_model -- it keeps the parameter count
-    about the same.
+    matrices instead of the classic two, which is why the default ffn_hidden
+    is 8/3 * d_model rather than 4 * d_model -- it keeps the parameter count
+    about the same. (The GQA preset is wider, 1664 not 1408: decision S7.)
 
     Attribute names match ModelConfig.param_counts() (w_gate, w_up, w_down).
     No biases, per decision S1.
