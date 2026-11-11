@@ -45,8 +45,14 @@ parameters in the embedding table than in the entire rest of the model. At
 
 Confirm after A measures fertility on TinyStories.
 
-- Decision:
-- Rationale:
+- Decision: **Closed 2026-10-24 · By: Saurav.** Keep vocab 4,096
+  (byte-level BPE, `<pad>`=0 `<bos>`=1 `<eos>`=2 `<unk>`=3).
+- Rationale: measured fertility on the val split (after ftfy cleaning) is
+  **1.297 tokens/word**, against **1.263** for GPT-2's 50,257-token
+  tokenizer on the same text. GPT-2 is only ~2.7% more efficient with 12x the
+  vocab. At 4,096 the tied embedding is 2,097,152 params (7.5% of 27,795,968);
+  a GPT-2 vocab would need 25.7M, more than the rest of the model.
+  `<unk>` rate is 0%. Details: `docs/track_a_notes.md`.
 
 ---
 

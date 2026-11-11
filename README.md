@@ -1,5 +1,16 @@
 # AFML SLM GQA DPO
 
+## Datasets
+
+| Dataset | Used for | Link |
+|---|---|---|
+| TinyStories | Tokenizer training and pretraining (1% held out as val) | https://huggingface.co/datasets/roneneldan/TinyStories |
+| Databricks Dolly-15k | SFT (human-written instructions) | https://huggingface.co/datasets/databricks/databricks-dolly-15k |
+| Stanford Alpaca | Earlier SFT run, kept for comparison (synthetic) | https://huggingface.co/datasets/tatsu-lab/alpaca |
+
+DPO preference pairs are built in-domain from held-out TinyStories
+(`scripts/build_preference_data.py`), not downloaded.
+
 ## Data pipeline
 
 Byte-level BPE tokenizer (vocab 4096) + TinyStories token files. Details and
