@@ -87,26 +87,58 @@ def build_example(
     return Example(input_ids=input_ids, labels=labels)
 
 
+# Short names accepted by --dataset in scripts/sft.py.
+SFT_DATASETS = {
+    "alpaca": "tatsu-lab/alpaca",                    # model-generated (text-davinci-003)
+    "dolly": "databricks/databricks-dolly-15k",      # human-written (Databricks employees)
+    "oasst1": "OpenAssistant/oasst1",                # human-written conversations
+}
+
+
+def iter_instruction_rows(dataset_name: str, limit: int | None = None):
+    """Yield (instruction, input_text, response) from any supported dataset.
+
+    Each dataset names its fields differently; this is the only place that
+    knows the mapping, so the rest of SFT is dataset-agnostic.
+    """
+    from datasets import load_dataset
+
+    name = SFT_DATASETS.get(dataset_name, dataset_name)
+    raw = load_dataset(name, split="train")
+
+    if name == "OpenAssistant/oasst1":
+        # A forest of message trees. Take first-turn pairs only: an English
+        # root prompt plus its top-ranked (rank 0) assistant reply.
+        roots = {r["message_id"]: r["text"] for r in raw
+                 if r["parent_id"] is None and r["role"] == "prompter" and r["lang"] == "en"}
+        rows = ((roots[r["parent_id"]], "", r["text"]) for r in raw
+                if r["role"] == "assistant" and r["rank"] == 0 and r["parent_id"] in roots)
+    elif name == "databricks/databricks-dolly-15k":
+        rows = ((r["instruction"], r.get("context", ""), r["response"]) for r in raw)
+    else:  # Alpaca layout
+        rows = ((r.get("instruction", ""), r.get("input", ""), r.get("output", "")) for r in raw)
+
+    for i, row in enumerate(rows):
+        if limit and i >= limit:
+            break
+        yield row
+
+
 def load_alpaca(cfg: Config, tok: Tokenizer, limit: int | None = None) -> list[Example]:
-    """Load, filter and tokenize Alpaca.
+    """Load, filter and tokenize the SFT dataset (cfg.sft.dataset_name).
+
+    Named for Alpaca, the original choice; Dolly and oasst1 go through the
+    same path via iter_instruction_rows.
 
     Filtering keeps short, simple examples -- the only ones a
     TinyStories-pretrained model has any chance of learning.
     """
-    from datasets import load_dataset
-
     s = cfg.sft
-    raw = load_dataset(s.dataset_name, split="train")
-    if limit:
-        raw = raw.select(range(min(limit, len(raw))))
-
     kept: list[Example] = []
-    n_too_long = n_no_fit = 0
+    n_too_long = n_no_fit = n_seen = 0
 
-    for row in raw:
-        instruction = row.get("instruction", "")
-        response = row.get("output", "")
-        input_text = row.get("input", "")
+    for instruction, input_text, response in iter_instruction_rows(s.dataset_name, limit):
+        n_seen += 1
         if not instruction or not response:
             continue
 
@@ -127,7 +159,7 @@ def load_alpaca(cfg: Config, tok: Tokenizer, limit: int | None = None) -> list[E
         kept.append(ex)
 
     print(
-        f"alpaca: {len(kept):,} kept of {len(raw):,}  "
+        f"{s.dataset_name}: {len(kept):,} kept of {n_seen:,}  "
         f"({n_too_long:,} too long, {n_no_fit:,} did not fit {cfg.model.max_seq_len})"
     )
     if kept:

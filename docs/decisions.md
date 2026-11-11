@@ -147,6 +147,79 @@ more useful question anyway -- given a fixed budget, is it better spent on
 full attention, or on cheaper attention plus a wider FFN? -- but it must be
 stated rather than left for a reader to infer.
 
+### S8. DPO pairs use the SFT instruction template
+**Date:** 2026-11-07 · **By:** Suhas
+
+Chosen: each pair is "### Instruction: Continue the story." + the first 48
+tokens of a held-out story, with chosen = the real remainder and rejected =
+the weak checkpoint's continuation (S3), formatted by the same
+`format_prompt` / `build_example` as SFT.
+
+Rejected: raw story continuations with no template.
+
+Why: DPO starts from the SFT model. Raw continuations would train it on a
+format SFT just taught it to leave, so DPO would partly undo SFT. With the
+template, SFT -> DPO is one format throughout. The weak model itself is a
+base checkpoint, so it is prompted raw (`<bos>` + opening) to get its best
+attempt; only the resulting text is placed in the template.
+
+Held-out source is the HF `validation` split: pretraining carved its val set
+from HF `train`, so neither the model nor the tokenizer has seen these
+stories. Only stories ending within 192 tokens are used, and the weak model
+gets the same 192-token budget. Mean chosen vs rejected lengths are recorded
+in `data/preference/stats.json` as a possible length confound.
+
+### S9. Reference log-probs precomputed; one model in memory
+**Date:** 2026-11-07 · **By:** Suhas
+
+Chosen: compute the frozen SFT reference's log-probs for every pair once,
+save to `data/ref_logprobs_{train,test}.npz` with a fingerprint of the pairs,
+then train the same model object as the policy.
+
+Rejected: keeping a second frozen copy of the model on the GPU.
+
+Why: the reference never changes, so recomputing it every step is wasted
+compute, and two 28M models plus activations for chosen and rejected is the
+memory pressure we can avoid on a T4. The fingerprint makes a stale cache
+recompute instead of silently giving wrong rewards.
+
+### S10. Evaluation: same prompts, same seed, three views
+**Date:** 2026-11-07 · **By:** Suhas
+
+Chosen: for base, SFT and DPO -- (1) perplexity on held-out TinyStories as a
+forgetting check, (2) samples on 12 fixed prompts in the shared template with
+per-prompt seeds, (3) preference accuracy on 200 held-out pairs, both summed
+and per-token, plus DPO's implicit-reward accuracy against SFT.
+
+Rejected: an LLM-as-judge win rate (needs an external API and judges
+adult-assistant quality our model cannot have); a single preference number
+(summed log-prob favours short responses, so it can mislead on its own).
+
+Why: each view answers a different question -- did fluency survive, what
+changed in behaviour, does the model prefer real text -- and none is
+sufficient alone.
+
+---
+
+## OPEN — track D
+
+### O6. SFT dataset
+Alpaca is model-generated (text-davinci-003); the TA advised against
+synthetic data. `--dataset dolly` (Dolly-15k, human-written) and
+`--dataset oasst1` (OpenAssistant, first-turn top-ranked English replies)
+are implemented.
+
+- Decision (2026-11-09, Suhas): use the existing Alpaca SFT checkpoint
+  (`gqa_sft/final.pt`, run by Mythri, Kaggle notebook60e6ad04ff) and proceed
+  to DPO. That run: code at `6459608` (same template and masking as the DPO
+  pairs), started from `gqa_base/final.pt`, 45,379 of 52,002 Alpaca examples
+  kept, 2 epochs at lr 2e-5, val loss 4.21 -> 2.50 (ppl 67.7 -> 12.2).
+- Rationale: the TA was asked which human-written dataset to use but had
+  not replied by 9 Nov, and the deadline is 15 Nov. Re-running SFT on Dolly
+  or oasst1 remains a one-flag change (`--dataset`) if time allows.
+- Limitation to state in the write-up: Alpaca is model-generated
+  (text-davinci-003), which the TA advised against.
+
 ---
 
 ## Template

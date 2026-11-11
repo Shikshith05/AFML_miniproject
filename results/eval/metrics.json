@@ -1,0 +1,72 @@
+{
+  "base": {
+    "checkpoint": "checkpoints/gqa_base/final.pt",
+    "step": 11999,
+    "perplexity": {
+      "loss": 1.3292638207921563,
+      "ppl": 3.778260886378326,
+      "n_stories": 500,
+      "n_tokens": 101619
+    },
+    "generation": {
+      "mean_tokens": 105.08333333333333,
+      "eos_rate": 0.75,
+      "distinct_2": 0.8628370457209847
+    },
+    "preference": {
+      "acc_sum": 0.785,
+      "acc_mean": 0.91,
+      "mean_logp_per_token_chosen": -1.6383544944130364,
+      "mean_logp_per_token_rejected": -2.158586832854926,
+      "n_pairs": 200
+    }
+  },
+  "sft": {
+    "checkpoint": "checkpoints/gqa_sft/final.pt",
+    "step": 2778,
+    "perplexity": {
+      "loss": 1.5162557572779511,
+      "ppl": 4.555137684089113,
+      "n_stories": 500,
+      "n_tokens": 101619
+    },
+    "generation": {
+      "mean_tokens": 81.91666666666667,
+      "eos_rate": 0.5833333333333334,
+      "distinct_2": 0.8335664335664336
+    },
+    "preference": {
+      "acc_sum": 0.76,
+      "acc_mean": 0.915,
+      "mean_logp_per_token_chosen": -1.8094266549639724,
+      "mean_logp_per_token_rejected": -2.313593976279153,
+      "n_pairs": 200
+    }
+  },
+  "dpo": {
+    "checkpoint": "checkpoints/gqa_dpo/final.pt",
+    "step": 87,
+    "perplexity": {
+      "loss": 1.5586401280456903,
+      "ppl": 4.752354255726374,
+      "n_stories": 500,
+      "n_tokens": 101619
+    },
+    "generation": {
+      "mean_tokens": 93.33333333333333,
+      "eos_rate": 0.6666666666666666,
+      "distinct_2": 0.9107142857142857
+    },
+    "preference": {
+      "acc_sum": 0.78,
+      "acc_mean": 0.945,
+      "mean_logp_per_token_chosen": -1.8267143027730455,
+      "mean_logp_per_token_rejected": -2.483991593904661,
+      "n_pairs": 200
+    },
+    "implicit_reward_vs_sft": {
+      "reward_acc": 0.96,
+      "reward_margin": 1.9380525350570679
+    }
+  }
+}

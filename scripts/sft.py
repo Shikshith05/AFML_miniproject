@@ -32,6 +32,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--epochs", type=int, default=None)
     p.add_argument("--lr", type=float, default=None)
     p.add_argument("--micro-batch-size", type=int, default=None)
+    p.add_argument("--dataset", type=str, default=None,
+                   help="alpaca | dolly | oasst1 (or any HF name); default: config")
     p.add_argument("--limit", type=int, default=None,
                    help="use only the first N Alpaca rows (smoke test)")
     p.add_argument("--dry-run", action="store_true",
@@ -50,6 +52,8 @@ def main() -> int:
         cfg.sft.lr = args.lr
     if args.micro_batch_size is not None:
         cfg.sft.micro_batch_size = args.micro_batch_size
+    if args.dataset is not None:
+        cfg.sft.dataset_name = args.dataset
     if cfg.train.device.startswith("cuda") and not torch.cuda.is_available():
         print("warning: no CUDA -- falling back to cpu")
         cfg.train.device, cfg.train.precision = "cpu", "fp32"
