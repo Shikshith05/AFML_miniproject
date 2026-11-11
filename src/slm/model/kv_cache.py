@@ -7,9 +7,9 @@ Without a cache the model recomputes them all for each new token, so
 generating n tokens costs O(n^2) token-forwards. With one, each step runs
 the model on the new token only and reads earlier K/V from here.
 
-K and V are stored at n_kv_heads -- before Attention repeats them up to
-n_heads. That is where GQA's memory saving is realised: with n_kv_heads=2
-instead of 8, this cache is 4x smaller.
+K and V are stored at n_kv_heads, never expanded to n_heads. That is where
+GQA's memory saving is realised: with n_kv_heads=2 instead of 8, this cache
+is 4x smaller.
 
     cache = KVCache(model.cfg, batch_size=1)
     logits = model(prompt, kv_cache=cache)      # prefill: whole prompt at once
