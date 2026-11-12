@@ -15,38 +15,7 @@ why. Sign your entries so we know who to ask.
 
 ## OPEN — to settle in the kickoff session (Sat 25 Oct)
 
-### O3. Per-run time budget → `max_steps`
-
-Draft `max_steps=20000` is ~1.31B tokens, likely 4–6 h on a T4. With two
-pretraining runs needed and a 15 Nov deadline, that may be too long.
-
-Set a wall-clock budget per run (suggest 3 h), measure throughput in the
-smoke run, then derive `max_steps` from it.
-
-- Decision:
-- Rationale:
-
-### O4. Batch size and precision
-
-`micro_batch_size=16` is a guess; tune to just under OOM, then set
-`grad_accum_steps` to hold the effective batch at 128.
-
-`precision="fp16"` is correct for a Kaggle T4 (Turing — no bf16 support).
-Revisit only if we get a P100 or better.
-
-- Decision:
-- Rationale:
-
-### O5. Vocabulary size
-
-Draft is 4096. The justification is that a 50k GPT-2 vocab would put more
-parameters in the embedding table than in the entire rest of the model. At
-4096 the embedding is ~8% of parameters.
-
-Confirm after A measures fertility on TinyStories.
-
-- Decision:
-- Rationale:
+O3, O4 and O5 were settled from the pretraining runs: see S11, S12 and S13.
 
 ---
 
@@ -199,6 +168,84 @@ Why: each view answers a different question -- did fluency survive, what
 changed in behaviour, does the model prefer real text -- and none is
 sufficient alone.
 
+### S11. Pretraining length: 12,000 steps (was O3)
+**Date:** 2026-10-29 (MHA run) · **By:** Mythri (runs); recorded by Shikshith
+
+Chosen: `max_steps = 12,000` for both pretraining runs. At 85 x 512 tokens
+per step that is 522,240,000 tokens, about 1.08 epochs of the 481.6M-token
+train split.
+
+Rejected: the draft 20,000 steps (1.31B tokens, about 2.7 epochs).
+
+Why: a wall-clock budget per run (the notebook's probe is run with
+`--budget-hours 3`), with two runs to fit before 15 Nov. Measured from
+`results/*/metrics.jsonl`: MHA took 14,188 s (3.94 h) and GQA 11,463 s
+(3.18 h) on a Kaggle T4, in different sessions. At those rates the draft
+20,000 steps would have been about 6.6 h and 5.3 h.
+Validation loss was still falling slowly at the end (MHA 1.3557, GQA 1.3530),
+so more steps would have helped both equally; the comparison holds because
+the budget is identical (S5).
+
+### S12. Batch size and precision: micro-batch 85, no accumulation, fp16 (was O4)
+**Date:** 2026-10-29 (MHA run) · **By:** Mythri (runs); recorded by Shikshith
+
+Chosen: `micro_batch_size = 85`, `grad_accum_steps = 1` (effective batch
+85 sequences, 43,520 tokens per step), `precision = "fp16"`, identical for
+MHA and GQA (values from the `start` config in both metrics logs).
+
+Rejected: the draft 16 x 8 = 128; bf16.
+
+Why: 85 comes from `scripts/probe_batch_size.py`, which finds the largest
+micro-batch that fits the T4 with a 0.9 safety factor. fp16 because the T4
+(Turing) has no bf16 tensor cores. The probe would suggest accumulation 2
+to approach the 128 target; the runs used 1, so the effective batch is 85,
+not 128. The probe output itself was not committed, so the reason for
+dropping accumulation is not recorded here -- to confirm with Mythri. It
+does not affect the ablation: both runs used the same values.
+
+### S13. Vocabulary size 4096 (was O5)
+**Date:** 2026-10-24 · **By:** Saurav (track A); recorded by Shikshith
+
+Chosen: byte-level BPE with 4096 tokens, trained on the TinyStories train
+split only.
+
+Rejected: GPT-2's 50,257-token vocabulary.
+
+Why (measured, `docs/track_a_notes.md`): fertility on the validation text
+is 1.297 tokens per word against 1.263 for GPT-2, so GPT-2 would save only
+about 2.5% of tokens. Its embedding alone would be 50,257 x 512 = 25.7M
+parameters, nearly the whole budget; ours is 4096 x 512 = 2,097,152, 7.5%
+of the final 27,795,968 (tied with the LM head, S4). `<unk>` rate is 0.0%
+(byte-level).
+
+### S14. GQA attention uses SDPA's `enable_gqa` instead of copying K/V
+**Date:** 2026-11-06 · **By:** Mythri (code, `5951d91`, `6459608`); recorded by Shikshith
+
+Chosen: when torch's `scaled_dot_product_attention` accepts
+`enable_gqa=True` (torch >= 2.5), K and V are passed at `n_kv_heads` and
+SDPA groups the query heads itself. Support is detected once at import by
+making a real call (`attention._probe_sdpa_gqa`, since SDPA is a C builtin
+and `inspect.signature` fails on it). Older torch falls back to
+`repeat_interleave`.
+
+Rejected: always `repeat_interleave` (the original code).
+
+Why: `repeat_interleave` copied K/V to all 8 heads on every forward,
+including every decode step: 2.15 GB written per generated token at batch
+64, context 2048, fp16. That cancels the point of the 4x smaller KV cache.
+Measured cost of the old path, `results/benchmark/benchmark.json` (T4,
+1 Nov): GQA decode tokens/s vs MHA was -48.2% at batch 64, context 1024
+and -51.8% at context 2048; at batch 1 and 16 the two were within a few
+percent. (At batch 64 with short contexts GQA was 12-13% slower too, but
+GQA's wider FFN also costs time there, so that gap is not the copy alone.)
+
+Equivalence: `tests/test_attention.py::test_enable_gqa_matches_repeat_interleave_fallback`
+forces both paths on the same weights for `n_kv_heads` in 8, 4, 2, 1 and
+compares a full forward, a prefill and cached decode steps (CPU). No
+weights change, so the trained checkpoints are unaffected. The T4 benchmark
+on the new path is prepared (`results/benchmark_enable_gqa`, which records
+`sdpa_enable_gqa` in the JSON) and pending.
+
 ---
 
 ## OPEN — track D
@@ -219,6 +266,10 @@ are implemented.
   or oasst1 remains a one-flag change (`--dataset`) if time allows.
 - Limitation to state in the write-up: Alpaca is model-generated
   (text-davinci-003), which the TA advised against.
+- 2026-11-12 (Shikshith): an oasst1 re-run (SFT -> DPO -> evaluate, outputs
+  `gqa_sft_oasst1`, `gqa_dpo_oasst1`, `results/eval_oasst1`, Alpaca results
+  untouched) is prepared on branch `shikshith/final-prep` and pending; steps
+  in `docs/RUNBOOK.md`.
 
 ---
 
