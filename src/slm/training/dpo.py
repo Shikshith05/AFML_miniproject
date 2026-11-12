@@ -124,24 +124,48 @@ def pairs_fingerprint(pairs: list[TokenizedPair]) -> str:
     return h.hexdigest()[:16]
 
 
+def model_fingerprint(model: nn.Module) -> str:
+    """Hash of every weight: the cache is only valid for this exact reference model.
+
+    Pairs alone are not enough -- DPO from a different SFT checkpoint (say
+    oasst1 instead of Alpaca) on the same pairs would otherwise reuse the old
+    model's log-probs and train against the wrong reference without any error.
+    """
+    import hashlib
+
+    h = hashlib.sha256()
+    for name, t in sorted(model.state_dict().items()):
+        h.update(name.encode())
+        h.update(t.detach().to("cpu", torch.float32).contiguous().numpy().tobytes())
+    return h.hexdigest()[:16]
+
+
 def load_or_compute_reference(path, ref_model, pairs, **kw) -> tuple[np.ndarray, np.ndarray]:
     """Load cached reference log-probs, or compute and save them.
 
-    A cache built from different pairs would silently give wrong rewards, so
-    the file stores a fingerprint of its pairs and is recomputed on mismatch.
+    A cache built from different pairs, or from a different reference model,
+    would silently give wrong rewards, so the file stores a fingerprint of
+    both and is recomputed on any mismatch. (Caches written before the model
+    fingerprint existed have no `model_fingerprint` and are recomputed once.)
     """
     path = Path(path)
     fp = pairs_fingerprint(pairs)
+    mfp = model_fingerprint(ref_model)
     if path.exists():
         d = np.load(path)
-        if str(d["fingerprint"]) == fp:
+        cached_mfp = str(d["model_fingerprint"]) if "model_fingerprint" in d.files else None
+        if str(d["fingerprint"]) != fp:
+            print(f"reference log-probs: {path} is for different pairs, recomputing")
+        elif cached_mfp != mfp:
+            print(f"reference log-probs: {path} is for a different reference model "
+                  f"({cached_mfp} != {mfp}), recomputing")
+        else:
             print(f"reference log-probs: loaded {path}")
             return d["chosen"], d["rejected"]
-        print(f"reference log-probs: {path} is for different pairs, recomputing")
     print(f"reference log-probs: computing for {len(pairs):,} pairs ...")
     c, r = compute_reference_logprobs(ref_model, pairs, **kw)
     path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez(path, chosen=c, rejected=r, fingerprint=fp)
+    np.savez(path, chosen=c, rejected=r, fingerprint=fp, model_fingerprint=mfp)
     return c, r
 
 

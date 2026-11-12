@@ -108,11 +108,14 @@ def iter_instruction_rows(dataset_name: str, limit: int | None = None):
 
     if name == "OpenAssistant/oasst1":
         # A forest of message trees. Take first-turn pairs only: an English
-        # root prompt plus its top-ranked (rank 0) assistant reply.
+        # root prompt plus its top-ranked (rank 0) assistant reply. Messages
+        # flagged `deleted` (removed by moderators) are skipped on both sides.
         roots = {r["message_id"]: r["text"] for r in raw
-                 if r["parent_id"] is None and r["role"] == "prompter" and r["lang"] == "en"}
+                 if r["parent_id"] is None and r["role"] == "prompter" and r["lang"] == "en"
+                 and not r.get("deleted")}
         rows = ((roots[r["parent_id"]], "", r["text"]) for r in raw
-                if r["role"] == "assistant" and r["rank"] == 0 and r["parent_id"] in roots)
+                if r["role"] == "assistant" and r["rank"] == 0 and r["parent_id"] in roots
+                and not r.get("deleted"))
     elif name == "databricks/databricks-dolly-15k":
         rows = ((r["instruction"], r.get("context", ""), r["response"]) for r in raw)
     else:  # Alpaca layout
