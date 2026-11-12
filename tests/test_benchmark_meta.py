@@ -26,7 +26,10 @@ def test_metadata_records_torch_gqa_path_commit_and_date():
 
     meta = load_bench().run_metadata()
     assert meta["torch_version"] == torch.__version__
-    assert meta["sdpa_enable_gqa"] is bool(attention._SDPA_HAS_GQA)
+    assert meta["sdpa_enable_gqa"] is bool(attention._USE_ENABLE_GQA)
+    assert meta["kv_path"] == attention.kv_path()
+    assert meta["sdpa_has_enable_gqa"] is bool(attention._SDPA_HAS_GQA)
+    assert "enable_gqa_env" in meta
     assert datetime.datetime.fromisoformat(meta["date_utc"]).tzinfo is not None
     if (REPO / ".git").exists():
         assert meta["git_commit"] and len(meta["git_commit"]) == 40
@@ -34,11 +37,21 @@ def test_metadata_records_torch_gqa_path_commit_and_date():
     json.dumps(meta)    # must be JSON-serialisable as it goes into benchmark.json
 
 
-def test_default_out_is_a_new_folder():
-    import inspect
+def test_metadata_records_the_kv_path_actually_used(monkeypatch):
+    bench = load_bench()
+    monkeypatch.setattr(attention, "_USE_ENABLE_GQA", False)
+    meta = bench.run_metadata()
+    assert (meta["kv_path"], meta["sdpa_enable_gqa"]) == ("repeat_interleave", False)
+    monkeypatch.setattr(attention, "_USE_ENABLE_GQA", True)
+    meta = bench.run_metadata()
+    assert (meta["kv_path"], meta["sdpa_enable_gqa"]) == ("sdpa_enable_gqa", True)
 
-    src = inspect.getsource(load_bench().main)
-    assert 'default="results/benchmark_enable_gqa"' in src
+
+def test_default_out_follows_kv_path_and_never_the_1_nov_folder():
+    out = load_bench().DEFAULT_OUT
+    assert out == {"repeat_interleave": "results/benchmark_repeat_interleave",
+                   "sdpa_enable_gqa": "results/benchmark_enable_gqa"}
+    assert "results/benchmark" not in out.values()
 
 
 def test_refuses_to_overwrite_existing_benchmark(tmp_path):

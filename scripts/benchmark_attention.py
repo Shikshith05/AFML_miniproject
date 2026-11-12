@@ -24,16 +24,21 @@ anything longer measures cost, not quality. Perplexity comparisons come from
 the pretraining runs; this script measures only time and memory, for which
 randomly initialised weights are equivalent.
 
-    python scripts/benchmark_attention.py --out results/benchmark_enable_gqa
+    python scripts/benchmark_attention.py                          # default path
+    SLM_SDPA_ENABLE_GQA=1 python scripts/benchmark_attention.py    # opt-in path
 
-Output: <out>/benchmark.json. The default folder is results/benchmark_enable_gqa:
-results/benchmark/ holds the 1 Nov run, made before attention.py switched to
-SDPA's enable_gqa (6 Nov), and is kept for the before/after comparison. The
-script refuses to overwrite an existing benchmark.json unless --overwrite.
+Output: <out>/benchmark.json. The default folder follows the K/V path GQA
+uses in this process (attention.kv_path()): results/benchmark_repeat_interleave
+for the default, results/benchmark_enable_gqa for the SLM_SDPA_ENABLE_GQA=1
+opt-in. results/benchmark/ holds the 1 Nov run, which also measured the
+repeat_interleave path. The script refuses to overwrite an existing
+benchmark.json unless --overwrite.
 
 Besides the measurements, the JSON records the run's provenance: torch
-version, whether attention used SDPA's enable_gqa path
-(attention._SDPA_HAS_GQA), the git commit, and the date.
+version, the K/V path GQA used ("kv_path", plus "sdpa_enable_gqa" as a bool,
+the field older files carry), whether this torch supports enable_gqa at all
+("sdpa_has_enable_gqa"), the SLM_SDPA_ENABLE_GQA value, the git commit, and
+the date.
 
 Owner: tracks B + C.
 """
@@ -44,6 +49,7 @@ import argparse
 import gc
 import datetime
 import json
+import os
 import statistics
 import subprocess
 import sys
@@ -68,6 +74,10 @@ from slm.training.utils import (
 VARIANTS = ("mha", "gqa")
 DECODE_TOKENS = 32          # tokens generated per inference measurement
 REPO = Path(__file__).resolve().parents[1]
+DEFAULT_OUT = {
+    "repeat_interleave": "results/benchmark_repeat_interleave",
+    "sdpa_enable_gqa": "results/benchmark_enable_gqa",
+}
 
 
 def run_metadata() -> dict:
@@ -85,7 +95,12 @@ def run_metadata() -> dict:
     return {
         "torch_version": torch.__version__,
         "cuda_version": torch.version.cuda,
-        "sdpa_enable_gqa": bool(attention._SDPA_HAS_GQA),
+        # K/V path GQA actually used: True only for the SLM_SDPA_ENABLE_GQA=1
+        # opt-in on a torch that supports it. Same meaning as in older files.
+        "sdpa_enable_gqa": bool(attention._USE_ENABLE_GQA),
+        "kv_path": attention.kv_path(),
+        "sdpa_has_enable_gqa": bool(attention._SDPA_HAS_GQA),
+        "enable_gqa_env": os.environ.get(attention.ENABLE_GQA_ENV),
         "git_commit": git("rev-parse", "HEAD"),
         "git_dirty": None if status is None else bool(status),
         "date_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
@@ -272,8 +287,10 @@ def time_generation(
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="MHA vs GQA, same GPU, same session")
-    p.add_argument("--out", type=str, default="results/benchmark_enable_gqa",
-                   help="output folder (results/benchmark is the 1 Nov pre-enable_gqa run)")
+    p.add_argument("--out", type=str, default=DEFAULT_OUT[attention.kv_path()],
+                   help="output folder; default follows the K/V path "
+                        f"({', '.join(DEFAULT_OUT.values())}). results/benchmark "
+                        "is the 1 Nov run (repeat_interleave path)")
     p.add_argument("--overwrite", action="store_true",
                    help="replace an existing <out>/benchmark.json")
     p.add_argument("--precision", choices=["fp32", "fp16"], default="fp16")
@@ -295,11 +312,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     meta = run_metadata()
-    print(f"torch {meta['torch_version']}, SDPA enable_gqa path: {meta['sdpa_enable_gqa']}, "
+    print(f"torch {meta['torch_version']}, GQA K/V path: {meta['kv_path']}, "
           f"commit {meta['git_commit']}{' (dirty)' if meta['git_dirty'] else ''}")
-    if not meta["sdpa_enable_gqa"]:
-        print("WARNING: this torch has no SDPA enable_gqa -- GQA will use the "
-              "repeat_interleave fallback, the same path as the 1 Nov run")
+    if meta["enable_gqa_env"] == "1" and not meta["sdpa_has_enable_gqa"]:
+        print(f"WARNING: {attention.ENABLE_GQA_ENV}=1 but this torch has no SDPA "
+              "enable_gqa -- GQA uses repeat_interleave")
 
     if not torch.cuda.is_available():
         print("No GPU. This benchmark is only meaningful on the GPU you trained on.")
