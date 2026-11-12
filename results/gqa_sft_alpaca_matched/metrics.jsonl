@@ -1,0 +1,37 @@
+{"run": "gqa_sft_alpaca_matched", "wall_s": 0.0, "event": "start", "config": {"run_name": "gqa_sft_alpaca_matched", "model": {"vocab_size": 4096, "d_model": 512, "n_layers": 8, "n_heads": 8, "n_kv_heads": 2, "ffn_hidden": 1664, "max_seq_len": 512, "rope_theta": 10000.0, "rms_norm_eps": 1e-06, "tie_embeddings": true, "dropout": 0.0}, "data": {"dataset_name": "roneneldan/TinyStories", "tokenizer_path": "artifacts/tokenizer", "train_bin": "data/train.bin", "val_bin": "data/val.bin", "val_fraction": 0.01, "max_train_tokens": null}, "train": {"micro_batch_size": 16, "grad_accum_steps": 8, "max_steps": 20000, "warmup_ratio": 0.02, "lr": 0.0003, "min_lr_ratio": 0.1, "weight_decay": 0.1, "beta1": 0.9, "beta2": 0.95, "grad_clip": 1.0, "precision": "fp16", "eval_interval": 500, "checkpoint_interval": 1000, "log_interval": 20, "seed": 1337, "deterministic_data_order": true, "device": "cuda", "compile_model": false}, "eval": {"eval_batches": 50, "prompts_path": "data/eval_prompts.txt", "max_new_tokens": 128, "temperature": 0.8, "top_k": 50, "gen_seed": 42}, "sft": {"dataset_name": "alpaca", "max_instruction_tokens": 64, "max_response_tokens": 192, "lr": 2e-05, "epochs": 2, "micro_batch_size": 8, "grad_accum_steps": 4, "warmup_ratio": 0.03}, "dpo": {"beta": 0.1, "lr": 5e-06, "epochs": 1, "micro_batch_size": 4, "grad_accum_steps": 8, "n_pairs": 3000, "rejected_from_checkpoint": "", "ref_logprobs_cache": "data/ref_logprobs.npz"}}, "n_train": 10042, "n_val": 204, "max_steps": 626}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 1.52, "event": "eval", "step": 0, "val_loss": 4.30896, "val_ppl": 74.363}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 2.02, "event": "train", "step": 0, "epoch": 0, "loss": 4.50462, "lr": 1.1111111111111112e-06, "grad_norm": 9.0014}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 5.35, "event": "train", "step": 20, "epoch": 0, "loss": 3.83, "lr": 1.9999519424942158e-05, "grad_norm": 5.6019}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 8.54, "event": "train", "step": 40, "epoch": 0, "loss": 4.05866, "lr": 1.994191249267223e-05, "grad_norm": 4.9631}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 11.72, "event": "train", "step": 60, "epoch": 0, "loss": 3.24809, "lr": 1.9788894998454195e-05, "grad_norm": 4.5613}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 15.05, "event": "train", "step": 80, "epoch": 0, "loss": 3.46179, "lr": 1.9542099645037413e-05, "grad_norm": 5.3642}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 18.3, "event": "train", "step": 100, "epoch": 0, "loss": 3.29718, "lr": 1.9204159748658754e-05, "grad_norm": 4.2732}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 21.46, "event": "train", "step": 120, "epoch": 0, "loss": 3.05598, "lr": 1.8778681141453637e-05, "grad_norm": 3.9398}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 24.72, "event": "train", "step": 140, "epoch": 0, "loss": 3.28882, "lr": 1.8270203697083716e-05, "grad_norm": 3.88}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 27.93, "event": "train", "step": 160, "epoch": 0, "loss": 3.4632, "lr": 1.768415289010436e-05, "grad_norm": 5.0619}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 31.19, "event": "train", "step": 180, "epoch": 0, "loss": 2.948, "lr": 1.7026781905935336e-05, "grad_norm": 4.135}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 34.6, "event": "train", "step": 200, "epoch": 0, "loss": 3.02305, "lr": 1.6305104919123683e-05, "grad_norm": 3.8826}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 37.83, "event": "train", "step": 220, "epoch": 0, "loss": 2.97776, "lr": 1.5526822251822308e-05, "grad_norm": 3.9409}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 41.09, "event": "train", "step": 240, "epoch": 0, "loss": 3.35352, "lr": 1.4700238211046359e-05, "grad_norm": 4.0123}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 44.26, "event": "train", "step": 260, "epoch": 0, "loss": 3.07183, "lr": 1.3834172481387066e-05, "grad_norm": 4.2673}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 47.46, "event": "train", "step": 280, "epoch": 0, "loss": 3.13196, "lr": 1.293786601862637e-05, "grad_norm": 4.3906}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 50.66, "event": "train", "step": 300, "epoch": 0, "loss": 2.75209, "lr": 1.2020882448371191e-05, "grad_norm": 3.7973}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 53.15, "event": "eval", "step": 313, "epoch": 0, "val_loss": 2.98385, "val_ppl": 19.764}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 54.7, "event": "train", "step": 320, "epoch": 1, "loss": 2.82782, "lr": 1.1093006021787805e-05, "grad_norm": 3.8342}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 57.93, "event": "train", "step": 340, "epoch": 1, "loss": 2.75553, "lr": 1.0164137217252771e-05, "grad_norm": 4.2975}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 61.13, "event": "train", "step": 360, "epoch": 1, "loss": 2.68093, "lr": 9.244187101854848e-06, "grad_norm": 3.5918}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 64.27, "event": "train", "step": 380, "epoch": 1, "loss": 2.94269, "lr": 8.342971579914984e-06, "grad_norm": 4.026}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 67.4, "event": "train", "step": 400, "epoch": 1, "loss": 2.74419, "lr": 7.470106656896787e-06, "grad_norm": 4.1264}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 70.64, "event": "train", "step": 420, "epoch": 1, "loss": 2.60779, "lr": 6.634905836245764e-06, "grad_norm": 4.0413}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 73.82, "event": "train", "step": 440, "epoch": 1, "loss": 2.79473, "lr": 5.846280743937138e-06, "grad_norm": 3.5881}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 77.07, "event": "train", "step": 460, "epoch": 1, "loss": 2.85086, "lr": 5.112646041072233e-06, "grad_norm": 4.171}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 80.22, "event": "train", "step": 480, "epoch": 1, "loss": 2.78673, "lr": 4.441829639109849e-06, "grad_norm": 4.5737}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 83.42, "event": "train", "step": 500, "epoch": 1, "loss": 2.69845, "lr": 3.8409891757396465e-06, "grad_norm": 3.6537}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 86.55, "event": "train", "step": 520, "epoch": 1, "loss": 2.73442, "lr": 3.3165356426033236e-06, "grad_norm": 3.8112}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 89.85, "event": "train", "step": 540, "epoch": 1, "loss": 2.52599, "lr": 2.8740649797588113e-06, "grad_norm": 3.4759}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 93.12, "event": "train", "step": 560, "epoch": 1, "loss": 2.90984, "lr": 2.5182983667772674e-06, "grad_norm": 3.9373}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 96.36, "event": "train", "step": 580, "epoch": 1, "loss": 2.91832, "lr": 2.253031847569298e-06, "grad_norm": 3.947}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 99.63, "event": "train", "step": 600, "epoch": 1, "loss": 2.65457, "lr": 2.081095826445429e-06, "grad_norm": 4.1617}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 103.05, "event": "train", "step": 620, "epoch": 1, "loss": 2.82827, "lr": 2.0043248675895562e-06, "grad_norm": 3.715}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 104.35, "event": "eval", "step": 626, "epoch": 1, "val_loss": 2.88963, "val_ppl": 17.987}
+{"run": "gqa_sft_alpaca_matched", "wall_s": 105.22, "event": "done", "step": 626, "val_loss": 2.88963, "val_ppl": 17.987, "baseline_val_loss": 4.30896}
