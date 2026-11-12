@@ -1,7 +1,6 @@
 """Build every figure and table for the write-up from results/ alone.
 
-    python scripts/make_results.py \
-        --benchmark-note "Measured 1 Nov, before the enable_gqa change: GQA still copied K/V on every decode step"
+    python scripts/make_results.py
 
 Reads only files under results/ (no checkpoints, no datasets, no GPU) and
 takes seconds. Writes:
@@ -13,16 +12,20 @@ Inputs, each optional -- a missing one just skips its outputs:
 
   results/{mha_base,gqa_base}/metrics.jsonl   pretraining logs
   results/benchmark*/benchmark.json           every benchmark folder, e.g.
-                                              results/benchmark (1 Nov, before
-                                              enable_gqa) and results/benchmark_enable_gqa
+                                              results/benchmark (1 Nov, default
+                                              repeat_interleave path) and
+                                              results/benchmark_enable_gqa (opt-in path)
   results/gqa_sft*/, results/gqa_dpo*/        fine-tuning logs, any dataset suffix
   results/eval*/metrics.json                  evaluation, e.g. results/eval (Alpaca)
                                               and results/eval_oasst1
 
---benchmark-note is printed under the results/benchmark figure and table, so
-the pre-enable_gqa numbers are never shown without that caveat. A re-run that
-records its own provenance (torch version, sdpa_enable_gqa, commit, date) is
-labelled from that instead.
+Each benchmark figure and table is captioned with the K/V path it measured.
+results/benchmark (1 Nov) records no provenance but measured the default
+repeat_interleave path, and is labelled so; --benchmark-note, if given,
+replaces that caption. A run that records its own provenance (torch version,
+kv_path / sdpa_enable_gqa, commit, date) is labelled from that, and
+results/benchmark_enable_gqa as "enable_gqa (opt-in) path, T4". When both
+exist, a side-by-side table compares GQA vs MHA on each path.
 
 Owner: shared (write-up).
 """
@@ -221,15 +224,35 @@ def pretrain(results: Path, figs: Path, tables: Path) -> tuple[list[Path], dict]
 
 # -- benchmark ------------------------------------------------------------------
 
+def _gpu_short(b: dict) -> str:
+    gpu = str(b.get("gpu", "?"))
+    return "T4" if "T4" in gpu else gpu
+
+
+def bench_path(folder: str, b: dict) -> str:
+    """Short name of the K/V path a benchmark file measured, with its GPU."""
+    if "kv_path" in b:
+        opt_in = b["kv_path"] == "sdpa_enable_gqa"
+    elif "sdpa_enable_gqa" in b:
+        opt_in = bool(b["sdpa_enable_gqa"])
+    else:
+        # no provenance: the 1 Nov file predates enable_gqa (repeat_interleave);
+        # a benchmark_enable_gqa folder is named after its path
+        opt_in = folder == "benchmark_enable_gqa"
+    path = "enable_gqa (opt-in) path" if opt_in else "repeat_interleave (default) path"
+    return f"{path}, {_gpu_short(b)}"
+
+
 def bench_label(folder: str, b: dict, note: str | None) -> str:
-    if "sdpa_enable_gqa" in b:
-        path = "SDPA enable_gqa" if b["sdpa_enable_gqa"] else "repeat_interleave fallback"
+    if "sdpa_enable_gqa" in b or "kv_path" in b:
         date = str(b.get("date_utc", ""))[:10]
-        return (f"Measured {date} on {b.get('gpu', '?')}, torch {b.get('torch_version', '?')}, "
-                f"GQA path: {path}, commit {str(b.get('git_commit') or '?')[:7]}.")
+        return (f"{bench_path(folder, b)}. Measured {date} on {b.get('gpu', '?')}, "
+                f"torch {b.get('torch_version', '?')}, commit {str(b.get('git_commit') or '?')[:7]}.")
     if folder == "benchmark" and note:
         return note
-    return f"{b.get('gpu', '?')}, provenance not recorded."
+    if folder == "benchmark":
+        return f"{bench_path(folder, b)}. Measured 1 Nov on {b.get('gpu', '?')}; provenance not recorded in the file."
+    return f"{bench_path(folder, b)}. {b.get('gpu', '?')}, provenance not recorded."
 
 
 def benchmark(results: Path, figs: Path, tables: Path, note: str | None) -> tuple[list[Path], dict]:
@@ -313,7 +336,7 @@ def benchmark(results: Path, figs: Path, tables: Path, note: str | None) -> tupl
                           ["batch", "context", "MHA tok/s", "GQA tok/s", "GQA vs MHA",
                            "MHA KV MB", "GQA KV MB", "MHA peak GB", "GQA peak GB"], rows_t, notes)
 
-    # before/after, when the re-run exists next to the 1 Nov file
+    # side by side, when another run exists next to the 1 Nov (default-path) file
     if "benchmark" in loaded and len(loaded) > 1:
         old = {(r["variant"], r["batch_size"], r["context_len"]): r for r in loaded["benchmark"]["inference"]}
         for folder, b in loaded.items():
@@ -331,13 +354,15 @@ def benchmark(results: Path, figs: Path, tables: Path, note: str | None) -> tupl
                 rows_t.append([bs, c, f"{old[('gqa', bs, c)]['decode_tokens_per_s']:,.1f}",
                                f"{new[('gqa', bs, c)]['decode_tokens_per_s']:,.1f}",
                                pct(o * 100), pct(n * 100)])
-            out += save_table(tables, f"benchmark_before_after{suffix_of(folder, 'benchmark')}",
-                              f"GQA decode throughput before (results/benchmark) and after ({folder}) the enable_gqa change",
-                              ["batch", "context", "GQA tok/s before", "GQA tok/s after",
-                               "GQA vs MHA before", "GQA vs MHA after"], rows_t,
-                              [f"Before: {bench_label('benchmark', loaded['benchmark'], note)}",
-                               f"After: {bench_label(folder, b, note)}",
-                               "Each ratio is within one session; compare ratios, not absolute tok/s, across sessions."])
+            left, right = bench_path("benchmark", loaded["benchmark"]), bench_path(folder, b)
+            out += save_table(tables, f"benchmark_side_by_side{suffix_of(folder, 'benchmark')}",
+                              f"GQA decode throughput: {left} (results/benchmark) vs {right} ({folder})",
+                              ["batch", "context", "GQA tok/s (benchmark)", f"GQA tok/s ({folder})",
+                               "GQA vs MHA (benchmark)", f"GQA vs MHA ({folder})"], rows_t,
+                              [f"results/benchmark: {bench_label('benchmark', loaded['benchmark'], note)}",
+                               f"results/{folder}: {bench_label(folder, b, note)}",
+                               "Each ratio is within one session; compare ratios, not absolute tok/s, across sessions. "
+                               "A missing row is a config one run did not complete (e.g. OOM)."])
     return out, loaded
 
 
@@ -448,7 +473,7 @@ def main_table(tables: Path, pre: dict, bench: dict, evals: dict, note: str | No
         rows.append(["KV cache, seq 512, fp16 (MB)"] + both(lambda s: f"{s['kv_mb']:.2f}"))
     for folder, b in bench.items():
         tr = b.get("training", {}).get("summary")
-        tag = "1 Nov" if folder == "benchmark" else folder.replace("benchmark_", "")
+        tag = ("1 Nov, " if folder == "benchmark" else "") + bench_path(folder, b).replace(" path", "")
         if tr:
             rows.append([f"training tok/s, same session ({tag})",
                          fmt_int(tr["mha"]["tokens_per_s_mean"]), fmt_int(tr["gqa"]["tokens_per_s_mean"])])
@@ -490,7 +515,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--figures", default=None, help="default: <results>/figures")
     p.add_argument("--tables", default=None, help="default: <results>/tables")
     p.add_argument("--benchmark-note", default=None,
-                   help="caveat shown with results/benchmark (the run without recorded provenance)")
+                   help="replaces the caption of results/benchmark (the 1 Nov run, which "
+                        "records no provenance; default caption names its repeat_interleave path)")
     args = p.parse_args(argv)
 
     results = Path(args.results)

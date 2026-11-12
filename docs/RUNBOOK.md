@@ -66,7 +66,11 @@ results/eval_oasst1/samples.md
 `results/gqa_dpo/`, `results/eval/` or `data/preference/` show as modified,
 do not commit them (`git checkout -- <path>`).
 
-## (b) Benchmark re-run (enable_gqa)
+## (b) Benchmark re-run (enable_gqa opt-in path)
+
+The T4 run of this path has already been done (decision S14: it was slower,
+and `repeat_interleave` is the default again). This section is only needed
+to reproduce it; the notebooks set `SLM_SDPA_ENABLE_GQA=1` for it.
 
 Skip this if you set `RUN_BENCH = True` in (a); the file is then in the same zip.
 
@@ -79,15 +83,16 @@ Skip this if you set `RUN_BENCH = True` in (a); the file is then in the same zip
    ```
 3. *Save Version -> Save & Run All* (~15 min). Section 7 runs exactly:
    ```
-   python scripts/benchmark_attention.py --out results/benchmark_enable_gqa
+   SLM_SDPA_ENABLE_GQA=1 python scripts/benchmark_attention.py --out results/benchmark_enable_gqa
    ```
 4. Check that the cell prints `'sdpa_enable_gqa': True` and a torch version
-   >= 2.5. If it is `False`, the numbers measure the old copy path: do not commit.
+   >= 2.5. If it is `False`, the numbers measure the default repeat_interleave
+   path: do not commit them under this folder.
 5. Download `AFML_miniproject/results/benchmark_enable_gqa/benchmark.json`
    from the **Output** tab.
 
 **Commit:** `results/benchmark_enable_gqa/benchmark.json`. Never touch
-`results/benchmark/benchmark.json`; it is the "before" half of the comparison.
+`results/benchmark/benchmark.json`; it is the default-path half of the comparison.
 
 ## (c) Figures and tables
 
@@ -95,7 +100,7 @@ On a laptop, after the files from (a) and (b) are in place:
 
 ```powershell
 git checkout shikshith/final-prep
-python scripts/make_results.py --benchmark-note "Measured 1 Nov, before the enable_gqa change: GQA still copied K/V on every decode step"
+python scripts/make_results.py
 python -m pytest -q
 ```
 
@@ -104,7 +109,9 @@ It picks up `results/eval_oasst1`, `results/gqa_*_oasst1` and
 under `results/figures/` and `results/tables/`. New files to expect:
 `finetune_oasst1.*`, `benchmark_decode_enable_gqa.*`,
 `benchmark_memory_enable_gqa.*`, `tables/eval_oasst1.*`,
-`tables/benchmark_enable_gqa.*`, `tables/benchmark_before_after_enable_gqa.*`.
+`tables/benchmark_enable_gqa.*`, `tables/benchmark_side_by_side_enable_gqa.*`
+(labelled "enable_gqa (opt-in) path, T4" next to the 1 Nov repeat_interleave
+(default) path).
 `main_results`, `main_alignment` and `eval_preference` get updated.
 
 ## Afterwards (whoever writes it up)
@@ -112,5 +119,6 @@ under `results/figures/` and `results/tables/`. New files to expect:
 - `README.md`: copy the updated `results/tables/main_results.md` and
   `main_alignment.md` into "Main results", and drop the two "pending" notes.
 - `docs/decisions.md`: under O6 record the oasst1 outcome (examples kept,
-  SFT val loss, eval numbers, Kaggle notebook name); under S14 add the
-  measured enable_gqa numbers from `tables/benchmark_before_after_enable_gqa.md`.
+  SFT val loss, eval numbers, Kaggle notebook name); under S14 fill in
+  the "Result file" line and check the numbers there against
+  `tables/benchmark_side_by_side_enable_gqa.md`.

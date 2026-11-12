@@ -248,13 +248,16 @@ seed + *k* for every model, so the comparison is fair. Sampling:
 ### 9. Figures and tables
 
 ```powershell
-python scripts/make_results.py --benchmark-note "Measured 1 Nov, before the enable_gqa change: GQA still copied K/V on every decode step"
+python scripts/make_results.py
 ```
 
 Reads only `results/` and rebuilds every figure (`.png`, `.pdf`) and table
 (`.md`, `.tex`). New folders (`results/eval_oasst1`,
 `results/benchmark_enable_gqa`, `results/gqa_sft_oasst1`, …) are picked up
-automatically, including a before/after benchmark table.
+automatically. Each benchmark is captioned with the K/V path it measured:
+`results/benchmark` (1 Nov) as the repeat_interleave (default) path, and
+`results/benchmark_enable_gqa`, once committed, as "enable_gqa (opt-in) path,
+T4", with a side-by-side table of the two (`tables/benchmark_side_by_side_enable_gqa`).
 
 ## Tests
 

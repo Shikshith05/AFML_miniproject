@@ -65,9 +65,24 @@ def test_picks_up_rerun_folders(tmp_path):
                  "finetune", "finetune_oasst1", "eval_preference"):
         assert f"{name}.png" in figs and f"{name}.pdf" in figs
     for name in ("main_results", "main_alignment", "pretrain", "benchmark", "benchmark_enable_gqa",
-                 "benchmark_before_after_enable_gqa", "eval", "eval_oasst1"):
+                 "benchmark_side_by_side_enable_gqa", "eval", "eval_oasst1"):
         assert f"{name}.md" in tables and f"{name}.tex" in tables
     assert "OLD PATH NOTE" in (r / "tables" / "benchmark.md").read_text(encoding="utf-8")
     after = (r / "tables" / "benchmark_enable_gqa.md").read_text(encoding="utf-8")
-    assert "SDPA enable_gqa" in after and "OLD PATH NOTE" not in after
+    assert "enable_gqa (opt-in) path, T4" in after and "OLD PATH NOTE" not in after
+    side = (r / "tables" / "benchmark_side_by_side_enable_gqa.md").read_text(encoding="utf-8")
+    assert "repeat_interleave (default) path" in side and "enable_gqa (opt-in) path, T4" in side
     assert "oasst1" in (r / "tables" / "main_alignment.md").read_text(encoding="utf-8")
+
+
+def test_benchmark_captions_name_the_kv_path():
+    mr = load()
+    old = {"gpu": "Tesla T4"}  # 1 Nov file: no provenance fields
+    assert mr.bench_path("benchmark", old) == "repeat_interleave (default) path, T4"
+    assert "repeat_interleave (default) path" in mr.bench_label("benchmark", old, None)
+    assert mr.bench_label("benchmark", old, "NOTE") == "NOTE"
+    assert mr.bench_path("benchmark_enable_gqa", old) == "enable_gqa (opt-in) path, T4"
+    assert mr.bench_path("benchmark_x", {"gpu": "Tesla T4", "kv_path": "sdpa_enable_gqa"}) \
+        == "enable_gqa (opt-in) path, T4"
+    assert mr.bench_path("benchmark_x", {"gpu": "A100", "kv_path": "repeat_interleave",
+                                         "sdpa_enable_gqa": False}) == "repeat_interleave (default) path, A100"
