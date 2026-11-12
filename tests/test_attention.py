@@ -1,6 +1,7 @@
 """Test multi-head and grouped-query attention."""
 
 import math
+import os
 
 import pytest
 import torch
@@ -127,7 +128,8 @@ def test_enable_gqa_matches_repeat_interleave_fallback(monkeypatch, n_kv_heads):
     """Same weights and tokens through both K/V expansion paths must agree,
     on the plain forward pass and on every cached step.
 
-    The module flag is forced for each run. A spy on SDPA checks which path
+    Runs on every torch with enable_gqa, whatever the default is: the module
+    flag (_USE_ENABLE_GQA) is forced for each run. A spy on SDPA checks which path
     actually ran, so the comparison cannot pass by running one path twice.
     """
     if not attention._SDPA_HAS_GQA:
@@ -181,3 +183,50 @@ def test_probe_reports_false_on_torch_without_enable_gqa(monkeypatch):
 
     monkeypatch.setattr(F, "scaled_dot_product_attention", old_sdpa)
     assert attention._probe_sdpa_gqa() is False
+
+
+# --------------------------------------------------------------------------
+# default path and the SLM_SDPA_ENABLE_GQA opt-in
+# --------------------------------------------------------------------------
+
+def test_default_kv_path_is_repeat_interleave(monkeypatch):
+    """With the variable unset, GQA uses repeat_interleave even on a torch
+    that supports enable_gqa, and SDPA never sees the keyword."""
+    if attention.ENABLE_GQA_ENV not in os.environ:
+        # the flag read at import agrees (unless the test run itself opted in)
+        assert attention._USE_ENABLE_GQA is False
+        assert attention.kv_path() == "repeat_interleave"
+    monkeypatch.delenv(attention.ENABLE_GQA_ENV, raising=False)
+    assert attention._resolve_use_enable_gqa(sdpa_has_gqa=True) is False
+
+    monkeypatch.setattr(attention, "_USE_ENABLE_GQA", False)
+    seen = []
+    real_sdpa = F.scaled_dot_product_attention
+
+    def spy(q, k, v, **kw):
+        seen.append((k.size(1), "enable_gqa" in kw))
+        return real_sdpa(q, k, v, **kw)
+
+    monkeypatch.setattr(F, "scaled_dot_product_attention", spy)
+    with torch.no_grad():
+        Attention(ModelConfig(n_kv_heads=2)).eval()(torch.randn(1, 4, 512))
+    assert seen == [(8, False)]  # K/V expanded to all 8 heads, no keyword
+
+
+@pytest.mark.parametrize("value, has_gqa, expected", [
+    ("1", True, True),     # opted in, supported -> enable_gqa
+    ("1", False, False),   # opted in, old torch -> still the fallback
+    ("0", True, False),
+    ("", True, False),
+    ("true", True, False),  # only the exact value "1" opts in
+])
+def test_env_opt_in_switches_path(value, has_gqa, expected):
+    env = {attention.ENABLE_GQA_ENV: value}
+    assert attention._resolve_use_enable_gqa(env, sdpa_has_gqa=has_gqa) is expected
+
+
+def test_kv_path_reports_flag(monkeypatch):
+    monkeypatch.setattr(attention, "_USE_ENABLE_GQA", True)
+    assert attention.kv_path() == "sdpa_enable_gqa"
+    monkeypatch.setattr(attention, "_USE_ENABLE_GQA", False)
+    assert attention.kv_path() == "repeat_interleave"
