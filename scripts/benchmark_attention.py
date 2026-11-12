@@ -24,7 +24,16 @@ anything longer measures cost, not quality. Perplexity comparisons come from
 the pretraining runs; this script measures only time and memory, for which
 randomly initialised weights are equivalent.
 
-    python scripts/benchmark_attention.py --out results/benchmark
+    python scripts/benchmark_attention.py --out results/benchmark_enable_gqa
+
+Output: <out>/benchmark.json. The default folder is results/benchmark_enable_gqa:
+results/benchmark/ holds the 1 Nov run, made before attention.py switched to
+SDPA's enable_gqa (6 Nov), and is kept for the before/after comparison. The
+script refuses to overwrite an existing benchmark.json unless --overwrite.
+
+Besides the measurements, the JSON records the run's provenance: torch
+version, whether attention used SDPA's enable_gqa path
+(attention._SDPA_HAS_GQA), the git commit, and the date.
 
 Owner: tracks B + C.
 """
@@ -33,8 +42,10 @@ from __future__ import annotations
 
 import argparse
 import gc
+import datetime
 import json
 import statistics
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -43,6 +54,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import torch
 
+from slm.model import attention
 from slm.model.config import ModelConfig, gqa_base, mha_baseline
 from slm.model.kv_cache import KVCache
 from slm.model.transformer import Transformer
@@ -55,6 +67,29 @@ from slm.training.utils import (
 
 VARIANTS = ("mha", "gqa")
 DECODE_TOKENS = 32          # tokens generated per inference measurement
+REPO = Path(__file__).resolve().parents[1]
+
+
+def run_metadata() -> dict:
+    """Where these numbers came from. Recorded so a benchmark file can always
+    be matched to the code path it measured (the 1 Nov file could not)."""
+    def git(*args: str) -> str | None:
+        try:
+            r = subprocess.run(["git", *args], cwd=REPO, capture_output=True,
+                               text=True, timeout=10)
+            return r.stdout.strip() if r.returncode == 0 else None
+        except (OSError, subprocess.SubprocessError):
+            return None
+
+    status = git("status", "--porcelain", "--untracked-files=no")
+    return {
+        "torch_version": torch.__version__,
+        "cuda_version": torch.version.cuda,
+        "sdpa_enable_gqa": bool(attention._SDPA_HAS_GQA),
+        "git_commit": git("rev-parse", "HEAD"),
+        "git_dirty": None if status is None else bool(status),
+        "date_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+    }
 
 
 def free_gpu() -> None:
@@ -235,9 +270,12 @@ def time_generation(
 
 # --------------------------------------------------------------------------
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="MHA vs GQA, same GPU, same session")
-    p.add_argument("--out", type=str, default="results/benchmark")
+    p.add_argument("--out", type=str, default="results/benchmark_enable_gqa",
+                   help="output folder (results/benchmark is the 1 Nov pre-enable_gqa run)")
+    p.add_argument("--overwrite", action="store_true",
+                   help="replace an existing <out>/benchmark.json")
     p.add_argument("--precision", choices=["fp32", "fp16"], default="fp16")
     p.add_argument("--train-steps", type=int, default=20)
     p.add_argument("--train-reps", type=int, default=3,
@@ -248,7 +286,20 @@ def main() -> int:
     p.add_argument("--context-lens", type=int, nargs="+",
                    default=[128, 256, 512, 1024, 2048])
     p.add_argument("--batch-sizes", type=int, nargs="+", default=[1, 4, 16, 64])
-    args = p.parse_args()
+    args = p.parse_args(argv)
+
+    out = Path(args.out)
+    if (out / "benchmark.json").exists() and not args.overwrite:
+        print(f"{out / 'benchmark.json'} already exists -- pick a new --out "
+              "(old numbers are kept for comparison) or pass --overwrite")
+        return 2
+
+    meta = run_metadata()
+    print(f"torch {meta['torch_version']}, SDPA enable_gqa path: {meta['sdpa_enable_gqa']}, "
+          f"commit {meta['git_commit']}{' (dirty)' if meta['git_dirty'] else ''}")
+    if not meta["sdpa_enable_gqa"]:
+        print("WARNING: this torch has no SDPA enable_gqa -- GQA will use the "
+              "repeat_interleave fallback, the same path as the 1 Nov run")
 
     if not torch.cuda.is_available():
         print("No GPU. This benchmark is only meaningful on the GPU you trained on.")
@@ -257,7 +308,6 @@ def main() -> int:
     device = "cuda"
     name = torch.cuda.get_device_name(0)
     total_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
-    out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
     print(f"GPU: {name} ({total_gb:.1f} GB), precision {args.precision}")
@@ -357,6 +407,7 @@ def main() -> int:
 
     # ---- write -----------------------------------------------------------
     payload = {
+        **meta,
         "gpu": name,
         "total_memory_gb": round(total_gb, 2),
         "precision": args.precision,
