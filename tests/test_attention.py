@@ -147,7 +147,7 @@ def test_enable_gqa_matches_repeat_interleave_fallback(monkeypatch, n_kv_heads):
     monkeypatch.setattr(F, "scaled_dot_product_attention", spy)
 
     def run(use_enable_gqa: bool) -> tuple[torch.Tensor, torch.Tensor]:
-        monkeypatch.setattr(attention, "_SDPA_HAS_GQA", use_enable_gqa)
+        monkeypatch.setattr(attention, "_USE_ENABLE_GQA", use_enable_gqa)
         calls.clear()
         full = model(x)
         cache = KVCache(model.cfg, batch_size=2)
