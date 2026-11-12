@@ -6,11 +6,10 @@ here, so field names are a shared contract -- change them by PR, not in place.
     cfg = Config.from_yaml("configs/gqa_base.yaml")
     print(cfg.summary())
 
-DRAFT -- field naming is decision O1 in docs/decisions.md and is NOT settled.
-This file uses research-code naming (n_layers, d_model, n_heads); the earlier
-configs/*.yaml used HuggingFace naming (num_layers, hidden_size,
-num_attention_heads). The team picks one in the kickoff session and converts
-everything to it.
+Field naming is settled (decision S6 in docs/decisions.md): research-code
+names (n_layers, d_model, n_heads, n_kv_heads, max_seq_len). The YAMLs in
+configs/ are generated from the presets below with Config.to_yaml, so they
+cannot drift from this file.
 
 Note on `n_kv_heads`: this is the NUMBER OF KEY/VALUE HEADS, not the repeat
 factor. HuggingFace's Llama code uses `num_key_value_groups` for
@@ -338,7 +337,8 @@ class Config:
 
 # --------------------------------------------------------------------------
 # Presets -- the two runs the ablation needs.
-# Identical in every respect except n_kv_heads.
+# Identical except n_kv_heads (8 vs 2) and ffn_hidden (1408 vs 1664): GQA's
+# FFN is widened so both have exactly the same parameter count (S7).
 # --------------------------------------------------------------------------
 
 def mha_baseline() -> Config:
@@ -354,8 +354,8 @@ def gqa_base() -> Config:
     Comparing against MHA at that deficit would confound the attention
     variant with model capacity. Widening ffn_hidden 1408 -> 1664 returns
     exactly those parameters, so both presets are 27,795,968 params and the
-    only difference is how attention is structured. See O2 in
-    docs/decisions.md.
+    parameter budget is the same and only how it is spent differs: fewer
+    K/V heads, a wider FFN. See S7 in docs/decisions.md.
     """
     cfg = Config(run_name="gqa_base")
     cfg.model.n_kv_heads = 2
