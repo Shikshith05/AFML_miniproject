@@ -1,0 +1,13 @@
+# Demo prompts for scripts/generate.py: one per line, # starts a comment.
+# Instruction-style prompts get the SFT template for SFT/DPO checkpoints;
+# base checkpoints see the raw text (use --template to override).
+
+# stories, in the domain the model was pretrained on
+Write a short story about a cat who finds a red hat.
+Tell me a story about a little girl and her dog at the park.
+Once upon a time, there was a small boat that wanted to see the sea.
+
+# simple instructions and questions
+What color is the sky?
+Name three animals that live on a farm.
+Why should we share our toys?

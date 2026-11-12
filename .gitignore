@@ -37,6 +37,7 @@ htmlcov/
 data/**
 !data/**/
 !data/**/.gitkeep
+!data/demo_prompts.txt
 
 # --- Checkpoints / model weights ---
 checkpoints/**
