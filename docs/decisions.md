@@ -218,33 +218,54 @@ parameters, nearly the whole budget; ours is 4096 x 512 = 2,097,152, 7.5%
 of the final 27,795,968 (tied with the LM head, S4). `<unk>` rate is 0.0%
 (byte-level).
 
-### S14. GQA attention uses SDPA's `enable_gqa` instead of copying K/V
-**Date:** 2026-11-06 · **By:** Mythri (code, `5951d91`, `6459608`); recorded by Shikshith
+### S14. SDPA's `enable_gqa`: tried, measured, reverted on T4
+**Date:** 2026-11-06, revised 2026-11-12 · **By:** Mythri (code, `5951d91`, `6459608`); revert and record by Shikshith
 
-Chosen: when torch's `scaled_dot_product_attention` accepts
-`enable_gqa=True` (torch >= 2.5), K and V are passed at `n_kv_heads` and
-SDPA groups the query heads itself. Support is detected once at import by
-making a real call (`attention._probe_sdpa_gqa`, since SDPA is a C builtin
-and `inspect.signature` fails on it). Older torch falls back to
-`repeat_interleave`.
+Chosen (current): GQA layers expand K/V with `repeat_interleave` to all
+`n_heads` right before SDPA, the original code. SDPA's `enable_gqa=True`
+(K/V passed at `n_kv_heads`, SDPA groups the query heads) is kept as an
+opt-in only: `SLM_SDPA_ENABLE_GQA=1`, read once at import, and used only
+if `attention._probe_sdpa_gqa()` finds support (torch >= 2.5; probed by a
+real call because SDPA is a C builtin and `inspect.signature` fails on it).
+The KV cache stores K/V at `n_kv_heads` on both paths, so it is 4x smaller
+than MHA's either way.
 
-Rejected: always `repeat_interleave` (the original code).
+Tried (6 Nov): `enable_gqa=True` as the default whenever torch supports it.
+The motivation: `repeat_interleave` copies K/V to all 8 heads on every
+forward, including every decode step (2.15 GB written per generated token at
+batch 64, context 2048, fp16), and in `results/benchmark/benchmark.json`
+(T4, 1 Nov, `repeat_interleave` path) GQA decode tokens/s vs MHA was -48.2%
+at batch 64, context 1024 and -51.8% at context 2048; at batch 1 and 16 the
+two were within a few percent. (At batch 64 with short contexts GQA was
+12-13% slower too, but GQA's wider FFN also costs time there.)
 
-Why: `repeat_interleave` copied K/V to all 8 heads on every forward,
-including every decode step: 2.15 GB written per generated token at batch
-64, context 2048, fp16. That cancels the point of the 4x smaller KV cache.
-Measured cost of the old path, `results/benchmark/benchmark.json` (T4,
-1 Nov): GQA decode tokens/s vs MHA was -48.2% at batch 64, context 1024
-and -51.8% at context 2048; at batch 1 and 16 the two were within a few
-percent. (At batch 64 with short contexts GQA was 12-13% slower too, but
-GQA's wider FFN also costs time there, so that gap is not the copy alone.)
+Measured (Kaggle T4, sm_75, torch 2.11, `enable_gqa` path): worse than
+`repeat_interleave` on every count except the cache. On this GPU
+`enable_gqa=True` drops SDPA to the math backend, which materialises the
+full attention matrix:
+- training throughput: GQA -39.1% vs MHA (spread 3.5%, `--train-batch 48`);
+- training peak memory: +58% vs MHA;
+- decode slower than MHA at all 20 configs, from -17% to -71.3% (context
+  1024, batch 64);
+- OOM at context 2048, batch 64, where the `repeat_interleave` run completed;
+- KV cache still exactly 4x smaller (as expected: the cache does not depend
+  on the path).
+
+Reverted (12 Nov): `repeat_interleave` is the default again.
+
+Revisit: on Ampere or newer, where SDPA's FlashAttention kernel may accept
+grouped K/V without falling back, `enable_gqa` could win. Untested here.
+
+Result file: `results/benchmark_enable_gqa/benchmark.json` (records
+`kv_path` / `sdpa_enable_gqa` in the JSON). _To be filled in when it is
+committed: link the file and confirm the numbers above against it._
 
 Equivalence: `tests/test_attention.py::test_enable_gqa_matches_repeat_interleave_fallback`
 forces both paths on the same weights for `n_kv_heads` in 8, 4, 2, 1 and
-compares a full forward, a prefill and cached decode steps (CPU). No
-weights change, so the trained checkpoints are unaffected. The T4 benchmark
-on the new path is prepared (`results/benchmark_enable_gqa`, which records
-`sdpa_enable_gqa` in the JSON) and pending.
+compares a full forward, a prefill and cached decode steps (CPU);
+`test_default_kv_path_is_repeat_interleave` and `test_env_opt_in_switches_path`
+pin the default and the opt-in. No weights, shapes or outputs change, so the
+trained checkpoints are unaffected by either path.
 
 ---
 
