@@ -283,14 +283,15 @@ are implemented.
   pairs), started from `gqa_base/final.pt`, 45,379 of 52,002 Alpaca examples
   kept, 2 epochs at lr 2e-5, val loss 4.21 -> 2.50 (ppl 67.7 -> 12.2).
 - Rationale: the TA was asked which human-written dataset to use but had
-  not replied by 9 Nov, and the deadline is 15 Nov. Re-running SFT on Dolly
-  or oasst1 remains a one-flag change (`--dataset`) if time allows.
+  not replied by 9 Nov, and the deadline is 15 Nov. Dolly and oasst1 were subsequently run; their results are summarized below.
 - Limitation to state in the write-up: Alpaca is model-generated
   (text-davinci-003), which the TA advised against.
-- 2026-11-12 (Shikshith): an oasst1 re-run (SFT -> DPO -> evaluate, outputs
-  `gqa_sft_oasst1`, `gqa_dpo_oasst1`, `results/eval_oasst1`, Alpaca results
-  untouched) is prepared on branch `shikshith/final-prep` and pending; steps
-  in `docs/RUNBOOK.md`.
+- 2026-11-12 (Shikshith): the oasst1 and Dolly SFT -> DPO -> evaluation chains
+  were run. Oasst1 SFT/DPO story perplexities were 3.846/3.934; preference
+  accuracies were 0.770/0.920 and 0.800/0.945 (sum/per-token), with DPO reward
+  accuracy 0.980. Dolly SFT/DPO story perplexities were 4.120/4.154; preference
+  accuracies were 0.750/0.900 and 0.790/0.940, with DPO reward accuracy 0.970.
+  See `results/tables/main_alignment.md` and the per-dataset evaluation tables.
 
 ---
 
