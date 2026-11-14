@@ -43,19 +43,29 @@ configs, OOM at context 2048, batch 64), so it is an opt-in only (decision
 S14). The training-throughput difference above is within the run-to-run
 spread (15%).*
 
-**GQA model through SFT (Alpaca) and DPO**
+**GQA model through SFT (Alpaca, Dolly and OpenAssistant) and DPO**
+
+**GQA model through SFT and DPO**
 
 | model | story ppl | pref acc (sum) | pref acc (per-token) | DPO reward acc vs SFT |
 |---|---|---|---|---|
 | base | 3.778 | 0.785 | 0.910 | - |
 | SFT (alpaca) | 4.555 | 0.760 | 0.915 | - |
 | DPO (alpaca) | 4.752 | 0.780 | 0.945 | 0.960 |
+| base | 3.778 | 0.785 | 0.910 | - |
+| SFT (alpaca_matched) | 4.067 | 0.770 | 0.920 | - |
+| DPO (alpaca_matched) | 4.170 | 0.805 | 0.945 | 0.965 |
+| base | 3.778 | 0.785 | 0.910 | - |
+| SFT (dolly) | 4.120 | 0.750 | 0.900 | - |
+| DPO (dolly) | 4.154 | 0.790 | 0.940 | 0.970 |
+| base | 3.778 | 0.785 | 0.910 | - |
+| SFT (oasst1) | 3.846 | 0.770 | 0.920 | - |
+| DPO (oasst1) | 3.934 | 0.800 | 0.945 | 0.980 |
 
-*story ppl: held-out TinyStories stories (did fine-tuning hurt fluency?).
-Preference accuracy: 200 held-out pairs, real story ending vs a weak
-checkpoint's ending. Samples for 12 fixed prompts: [results/eval/samples.md](results/eval/samples.md).
-SFT on human-written data (OpenAssistant oasst1) instead of the
-model-generated Alpaca is prepared and pending (decision O6).*
+*Full tables: results/tables/eval.md, plus eval_<dataset>.md per extra SFT dataset.*
+
+
+*story ppl: held-out TinyStories stories (did fine-tuning hurt fluency?). Preference accuracy: 200 held-out pairs, real story ending vs a weak checkpoint's ending. Samples for 12 fixed prompts: [results/eval/samples.md](results/eval/samples.md). Full tables: [results/tables/](results/tables/).*
 
 ## Setup
 
@@ -278,8 +288,8 @@ the benchmark's provenance fields, the generation CLI and `make_results.py`.
 |---|---|---|
 | TinyStories | https://huggingface.co/datasets/roneneldan/TinyStories | `train` split: tokenizer and pretraining (stage 1–2, 1% held out for validation). `validation` split: preference pairs (stage 5) and evaluation perplexity (stage 7) — never seen in pretraining |
 | Alpaca | https://huggingface.co/datasets/tatsu-lab/alpaca | SFT (stage 4) for the current results. Model-generated (text-davinci-003) |
-| OpenAssistant oasst1 | https://huggingface.co/datasets/OpenAssistant/oasst1 | SFT re-run on human-written data (stage 4, `--dataset oasst1`): English first-turn prompts with their top-ranked reply. Prepared, pending |
-| Dolly 15k | https://huggingface.co/datasets/databricks/databricks-dolly-15k | SFT alternative (stage 4, `--dataset dolly`), human-written. Supported, not run |
+| OpenAssistant oasst1 | https://huggingface.co/datasets/OpenAssistant/oasst1 | SFT re-run on human-written data (stage 4, `--dataset oasst1`): English first-turn prompts with their top-ranked reply. Run; SFT story perplexity 3.85 |
+| Dolly 15k | https://huggingface.co/datasets/databricks/databricks-dolly-15k | SFT alternative (stage 4, `--dataset dolly`), human-written. Run |
 
 All are downloaded on first use through Hugging Face `datasets`.
 

@@ -2,7 +2,7 @@
 
 Three jobs: (a) the oasst1 SFT -> DPO -> evaluation chain, (b) the benchmark
 re-run, (c) rebuilding the figures and tables. (a) and (b) need a Kaggle GPU;
-(c) runs on a laptop in seconds. All code is on branch `shikshith/final-prep`;
+(c) runs on a laptop in seconds. All code is on branch `main`;
 the notebooks already point at it.
 
 | Job | Where | GPU time | Inputs |
@@ -28,7 +28,7 @@ Save & Run All*.
 3. In the settings cell set:
    ```python
    CHAIN_DATASET = "oasst1"
-   BRANCH        = "shikshith/final-prep"   # already the default
+   BRANCH        = "main"   # already the default
    SMOKE         = False                    # True first if you want a 5-min dry run
    ```
    Leave the other switches alone: `CHAIN_DATASET` turns on SFT, DPO and eval
@@ -79,7 +79,7 @@ Skip this if you set `RUN_BENCH = True` in (a); the file is then in the same zip
    ```python
    RUN_DATA = False; RUN_PROBE = False; RUN_TRAINING = False
    RUN_BENCH = True
-   BRANCH = "shikshith/final-prep"
+   BRANCH = "main"
    ```
 3. *Save Version -> Save & Run All* (~15 min). Section 7 runs exactly:
    ```
@@ -99,7 +99,7 @@ Skip this if you set `RUN_BENCH = True` in (a); the file is then in the same zip
 On a laptop, after the files from (a) and (b) are in place:
 
 ```powershell
-git checkout shikshith/final-prep
+git checkout main
 python scripts/make_results.py
 python -m pytest -q
 ```
