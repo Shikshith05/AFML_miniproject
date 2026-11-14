@@ -1,0 +1,74 @@
+{
+  "base": {
+    "checkpoint": "checkpoints/gqa_base/final.pt",
+    "step": 11999,
+    "perplexity": {
+      "loss": 1.3292638207921563,
+      "ppl": 3.778260886378326,
+      "n_stories": 500,
+      "n_tokens": 101619
+    },
+    "generation": {
+      "mean_tokens": 105.08333333333333,
+      "eos_rate": 0.75,
+      "distinct_2": 0.8628370457209847
+    },
+    "preference": {
+      "acc_sum": 0.785,
+      "acc_mean": 0.91,
+      "mean_logp_per_token_chosen": -1.6383544944130364,
+      "mean_logp_per_token_rejected": -2.158586832854926,
+      "n_pairs": 200
+    }
+  },
+  "sft": {
+    "checkpoint": "checkpoints/gqa_sft_oasst1/final.pt",
+    "step": 56,
+    "sft_dataset": "oasst1",
+    "perplexity": {
+      "loss": 1.347062746036205,
+      "ppl": 3.846111915880852,
+      "n_stories": 500,
+      "n_tokens": 101619
+    },
+    "generation": {
+      "mean_tokens": 62.333333333333336,
+      "eos_rate": 1.0,
+      "distinct_2": 0.8827977315689981
+    },
+    "preference": {
+      "acc_sum": 0.77,
+      "acc_mean": 0.92,
+      "mean_logp_per_token_chosen": -1.699955011798362,
+      "mean_logp_per_token_rejected": -2.1927198136748216,
+      "n_pairs": 200
+    }
+  },
+  "dpo": {
+    "checkpoint": "checkpoints/gqa_dpo_oasst1/final.pt",
+    "step": 87,
+    "sft_dataset": "oasst1",
+    "perplexity": {
+      "loss": 1.3696952227230206,
+      "ppl": 3.9341514727587477,
+      "n_stories": 500,
+      "n_tokens": 101619
+    },
+    "generation": {
+      "mean_tokens": 93.83333333333333,
+      "eos_rate": 0.5,
+      "distinct_2": 0.9110787172011662
+    },
+    "preference": {
+      "acc_sum": 0.8,
+      "acc_mean": 0.945,
+      "mean_logp_per_token_chosen": -1.6829005090183802,
+      "mean_logp_per_token_rejected": -2.347213691199663,
+      "n_pairs": 200
+    },
+    "implicit_reward_vs_sft": {
+      "reward_acc": 0.98,
+      "reward_margin": 2.1448564529418945
+    }
+  }
+}

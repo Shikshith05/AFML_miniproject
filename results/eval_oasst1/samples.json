@@ -1,0 +1,188 @@
+{
+  "base": [
+    {
+      "instruction": "Write a short story about a cat who finds a red hat.",
+      "input": "",
+      "response": "Your little brother: Victory!\n\nThe story has no name, no name.\n\nAt first it is fun, but it's important to remember that when someone does something wrong, they should try to tell them. That's when they remember that the cat's name was the most valuable thing to have.\n\nThe story ends, but the family who have been playing with the cat and the hat became the same. University was a sign of their own."
+    },
+    {
+      "instruction": "Write a story about a boy who is afraid of the dark.",
+      "input": "",
+      "response": "The boy's Mum: The boy was always very brave during this story and was now scared of the dark.\n\nMum: \"Come on, sweetie, try this story today. It will make you feel brave.\"\n\nThe boy: \"Yes, Mum!\"\n\nMum: \"Come on, let's go home.\"\n\nSo the boy and his mum went back home. The boy learned that the dark story was actually a very special story to be brave throughout the world!"
+    },
+    {
+      "instruction": "Tell me a story about two friends who share a toy.",
+      "input": "",
+      "response": "\"Always be kind and generous,\" she said. \"Always remember that the best way to solve this problem is to offer to share a toy with others.\"\n\nThe two friends agreed. They both hugged and thanked the wise old man in their hearts.\n\nThe wise old man smiled and said, \"Always remember to always be kind to others. And if you need help, always be generous.\"\n\nThe two friends hugged and promised to always be generous. They both smiled and were happy to help each other. From that day onwards, they shared a lot of treats together."
+    },
+    {
+      "instruction": "Write a happy story about a dog at the beach.",
+      "input": "",
+      "response": "Sometimes you make a little rot, and it can be used to give you good luck.\n\nSometimes I have to go to charge to get the rot. But that's ok.\n\nAt the end of each day, I have to go to the beach. I'd like to remember that he had to get back home after a long day of playing in the sand."
+    },
+    {
+      "instruction": "Continue the story.",
+      "input": "Once upon a time, there was a little bird who could not fly. Every day",
+      "response": "The bird's mom: \"You, Respon. You must be very brave and brave today. You must be a kind little bird.\"\n\nRespon: \"I don't feel brave. I want to fly!\"\n\nThe bird's mom smiled and said: \"No, Respon. You need to find a way to keep flying.\"\n\nRespon thought for a moment and realized that he had to be brave in order to fly. He flew away to find a new home.\n\nThe moral of this story is that courage is not for big things, but for"
+    },
+    {
+      "instruction": "Continue the story.",
+      "input": "Tom and Sue went to the park. They saw a big tree with",
+      "response": "Tom said: \"Let's climb the tree!\"\n\nSo they both started to climb.\n\nTom went up first and was very happy when he reached the top.\n\nHe shouted: \"I did it!\""
+    },
+    {
+      "instruction": "Continue the story.",
+      "input": "Lily had a small box. She did not know what was inside. One day",
+      "response": "Lily: Wood to my secret!\n\nAll of a sudden, she had the most amazing idea. She wanted to do something special.\n\nLily: I know! What if I make the most beautiful music?\n\nThat's when she started to feel sleepy. She put her head on her bed and started to make a special tune.\n\nEvery day, Lily sang her favourite song. She sang with a big smile on her face, and even when she felt tired, she knew that her special song would always be with her."
+    },
+    {
+      "instruction": "What color is the sky?",
+      "input": "",
+      "response": "Embrst? What a good shape!\n\nWhen she got to the end of the street, she saw a red square. It looked really pretty.\n\nShe smiled and went over to it.\n\n\"Is this a good shape?\".\n\nThe square replied, \"Yes! It's a great shape. I love it!\""
+    },
+    {
+      "instruction": "Name three animals that live on a farm.",
+      "input": "",
+      "response": "\"What do you think you should do to help, little creatures?\"\n\nThe little animals looked at each other and thought for a moment.\n\n\"Let's try to help them,\" one of them said.\n\nThe other animals thought it was a great idea and they all agreed.\n\nWith the help of Daisy, the animals started to help each other. With Daisy's help, they managed to help the animals and make them all happy.\n\nThe moral of Aunt Sue's story is that it is more important to help others than to be selfish."
+    },
+    {
+      "instruction": "Why should we be kind to our friends?",
+      "input": "",
+      "response": "Mama:\n\nDaddy: \nWhen we help others, we want to make them happy.\n\nMama: I want to make sure our friends love each other like this.\"\n\nTeddy: \"I want you to show how much fun we can be when we help others. That way, we can also be kind to them, even when we are kind like us.\"\n\nMama: We can take our friends with us, but we can show them how much we care.\n\nMoral: Music is a special gift of kindness and friendship."
+    },
+    {
+      "instruction": "Give me a word that rhymes with cat.",
+      "input": "",
+      "response": "Mummy: Miss Respon, can you get me a word?\n\nLittle Tommy: Twist!\n\nMummy: I need something special to get you a word.\n\nJimmy:\nMummy: Yellow?\n\nMummy: Go ahead and answer this word with a joke.\n\nLittle Tommy: Yellow!\n\nMummy: Yellow!! Victor!\n\nJimmy: Yellow!\n\nMummy: Yellow, today, quitting is fun, isn't it?\n\nDaddy: Yell"
+    },
+    {
+      "instruction": "What do you do when you feel sad?",
+      "input": "",
+      "response": "Jose:\n\n\"I feel bad when I am angry,\" he said.\n\nHis mum: \"It's time for your birthday. I'm going to have a special birthday party with lots of presents.\"\n\nJose was so excited and he couldn't wait.\n\nWhen the day of the birthday party arrived, Jose was so happy. His mum and dad gave him a big present and said it was a new toy car. \n\nJose was so happy and felt so loved. He played with the car all morning and it sounded so fun!"
+    }
+  ],
+  "sft": [
+    {
+      "instruction": "Write a short story about a cat who finds a red hat.",
+      "input": "",
+      "response": "Your story is a short story; it is a ralpber, it is too short to manage it. You should use your headphones to find the right spot.\n\nThis story is about a cat who has a very special hat that can be found near a park. It can be used by many people, but it is not a real hat. Take a look into its eyes, because it is real. Use your headphones as a reminder of its importance."
+    },
+    {
+      "instruction": "Write a story about a boy who is afraid of the dark.",
+      "input": "",
+      "response": "Something that is scary or not a reality. The story is definitely about the boy being the guardian of the nightmare, but he was wrong. The story is about being the guardian of the darkness and the boy who weapon the nightmare will use in the darkness. He is called the Signian of the nightmare."
+    },
+    {
+      "instruction": "Tell me a story about two friends who share a toy.",
+      "input": "",
+      "response": "Hour, four, Get away in your dreams, or the wise one will never forget the two ways the toy will listen so that you can continue to share a story.\""
+    },
+    {
+      "instruction": "Write a happy story about a dog at the beach.",
+      "input": "",
+      "response": "An old man who lived on the beach who loved to answer the book of stories and explore, and inspired that he could help many of his comfy friends in the port.\n\nAlthough the man never returned, he still had a very happy story to tell."
+    },
+    {
+      "instruction": "Continue the story.",
+      "input": "Once upon a time, there was a little bird who could not fly. Every day",
+      "response": "This story should be repaired by a very intelligent bird.\n\nThe intelligent bird has been living in the same spot and was very proud of itself. It has found its way back to the world."
+    },
+    {
+      "instruction": "Continue the story.",
+      "input": "Tom and Sue went to the park. They saw a big tree with",
+      "response": "We have been working so hard to get the tree down from the tree.\n\nWe can help the tree.\n\nTom and Sue started building the tree again. This time, they worked together and made sure the tree stayed safe and secure.\n\nThe tree was so happy with their work that it stayed on the tree for many years. \n \nTom and Sue were very happy to have helped the tree."
+    },
+    {
+      "instruction": "Continue the story.",
+      "input": "Lily had a small box. She did not know what was inside. One day",
+      "response": "It is something called \"Perini Perinus\".\n\nDesperate the evil versinate of the story.\n\nFor fascinating, the result of a small, hidden mystery was in its box."
+    },
+    {
+      "instruction": "What color is the sky?",
+      "input": "",
+      "response": "An color is yellow? An orange shape is yellow, or yellow, or blue."
+    },
+    {
+      "instruction": "Name three animals that live on a farm.",
+      "input": "",
+      "response": "What a popular animal on the farm is that a farmer has been suffering by a farmer. The farm is often a much too board-perous one, with different kinds of chickens and other animals living on their farm. It is a lifetime to be in chooshing."
+    },
+    {
+      "instruction": "Why should we be kind to our friends?",
+      "input": "",
+      "response": "There is so much to be kind to your friends. No one should ever compare to them or be rude to each other. It is not fair to be rude, like that.\"\nThe warrior's stories were foreshadowed by a warrior that he was about to be sensible. He thanked the warrior for being so kind, and for bringing him back to the right and for being so serious!"
+    },
+    {
+      "instruction": "Give me a word that rhymes with cat.",
+      "input": "",
+      "response": "Behave will always pay a price, or else you will never find the answer to your question."
+    },
+    {
+      "instruction": "What do you do when you feel sad?",
+      "input": "",
+      "response": "The most important thing of all:\nWhen you love the news, like the language of your friend or the news. From now on, they can have a new and exciting news and I feel better.\n\nAlthough the news was not what the news said, it had been worth it to buy them a new and better date."
+    }
+  ],
+  "dpo": [
+    {
+      "instruction": "Write a short story about a cat who finds a red hat.",
+      "input": "",
+      "response": "Your story is about a red hat that he licenseed. On the westure of the story, it is a dingedical system, which is a bluebracle. This hat is called 'history'. Do you know what 'peace' means?\"\n\nImmediately, your ding-dong-down and Is it the same as a red hat? How do you know that my story is about a challenge of a red hat?\nIs it a book about a red hat or a blue scarf"
+    },
+    {
+      "instruction": "Write a story about a boy who is afraid of the dark.",
+      "input": "",
+      "response": "Something that is scary or mysterious. As the dark departments on these words, the story can be heard every information about this story."
+    },
+    {
+      "instruction": "Tell me a story about two friends who share a toy.",
+      "input": "",
+      "response": "Hour down on the book. Hard on the book is about two friends that shares and shares the same.\n\nThe two friends continue to share the book together. They shared it between the book and the two friends have so much fun sharing it together. Soon, they have both company in common and soon they are both feeling very successful."
+    },
+    {
+      "instruction": "Write a happy story about a dog at the beach.",
+      "input": "",
+      "response": "An old man lived in the ocean by who loved to listen to his story and watch the waves crash against the shore.\n\nWrite-founding: What kind of stories are you will have to tell to hear?"
+    },
+    {
+      "instruction": "Continue the story.",
+      "input": "Once upon a time, there was a little bird who could not fly. Every day",
+      "response": "This teaches the bird to be more careful. Helpfully learn in order to fly, and forwards, sensation, and more opportunities, can be obvious the journey to achieve victory."
+    },
+    {
+      "instruction": "Continue the story.",
+      "input": "Tom and Sue went to the park. They saw a big tree with",
+      "response": "Wears boots and shots to protect the tree from tree branches.\n\nTom and Sue ran up to the tree. They stood on their boots and pretended they were roots. They jumped and flapped their arms. They laughed and sang.\n\n\"Roots are so big and strong!\" Tom said.\n\n\"Yes, they are!\" Sue said.\n\nThey played for a long time. They threw stones and sticks, made mud pies and crawled on the grass. They picked some flowers and picked some leaves. They chased each other around the tree. They had a lot of fun."
+    },
+    {
+      "instruction": "Continue the story.",
+      "input": "Lily had a small box. She did not know what was inside. One day",
+      "response": "It is something called \"Perinate Party\".\n\nLily wondered what 'Perin' meant. She asked her mom. \n\nMom said \"Perint goes to Party Party\nSixie Partin Party and I travel from Party Party on Eurini today, the Partin Party Festin Party Antrereless Sestrol. You can choose wisdom by your sislings.\n\nLily decided to get wisdom to explore Perin Party Party"
+    },
+    {
+      "instruction": "What color is the sky?",
+      "input": "",
+      "response": "Close tok? What color do you have inside?\nIs it blue?"
+    },
+    {
+      "instruction": "Name three animals that live on a farm.",
+      "input": "",
+      "response": "What are you doing on the farm?\nI am looking for food that belongs to you. I am looking for some to eat to help you find what you're looking for. There are a lot of food that you can find while I'm hunting. Do you want to help me?\n\nYes, I do. I am very hungry and need to find something to eat. How about I have a cowboy-ed and would you like to eat me?\nName 1050 pursuits the cowboy?\"\nDanny's eyes lit up with excitement. He quickly"
+    },
+    {
+      "instruction": "Why should we be kind to our friends?",
+      "input": "",
+      "response": "There is so much to be doing that you must include everyone, no matter how different or different they may be. However, I am not sure what to say.\nThe most important thing in this world is to show respect and think about what life is more valuable than anything else. So, all the people could communicate within the situation. The community of our relationship is called:\nWhen we do something special like include our friends, we actually feel like they are learning something new from the conversations."
+    },
+    {
+      "instruction": "Give me a word that rhymes with cat.",
+      "input": "",
+      "response": "Behave will be Radoschers. Go ahead and ask God, do you perndmically versioning your word? God would definitely offer you a silverfallic rhythm. Go ahead and answer this rhythm with the proper recently.\n\nBy a minute, I cannot decide what a silverfallic rhymes are saying. Radoschers are considered with instructions, so I am not considered a silverf"
+    },
+    {
+      "instruction": "What do you do when you feel sad?",
+      "input": "",
+      "response": "I'm feeling very lonely. I want to feel better right away, but I don't know how.\n \nActures of what to expect can help. Some places information and other things that are exactly the right answer. Some places may seem as peaceful as facing subjects and some of them may, but aren't anything that seems as peaceful as facing a person's hunger or activity. \nAssuree requires that someone else can require some help, except for one thing on the right response"
+    }
+  ]
+}

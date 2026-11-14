@@ -1,0 +1,9 @@
+**Evaluation of the GQA chain, SFT data: alpaca_matched**
+
+| model | SFT data | story ppl | pref acc (sum) | pref acc (per-token) | DPO reward acc vs SFT | eos rate | distinct-2 | mean tokens |
+|---|---|---|---|---|---|---|---|---|
+| base | - | 3.778 | 0.785 | 0.910 | - | 0.75 | 0.863 | 105.1 |
+| SFT | alpaca | 4.067 | 0.770 | 0.920 | - | 1.00 | 0.931 | 26.2 |
+| DPO | alpaca | 4.170 | 0.805 | 0.945 | 0.965 | 0.67 | 0.925 | 93.4 |
+
+*story ppl: held-out TinyStories validation stories (forgetting check). Preference accuracy: 200 held-out pairs, real ending vs weak checkpoint's. Generation scores: 12 fixed prompts, same seed per prompt.*

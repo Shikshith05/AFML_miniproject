@@ -18,6 +18,7 @@ Final model: both variants have **27,795,968 parameters**. MHA is 8 KV heads,
 | `076dbbc` | utils/params.py + parameter-count tests |
 | `d104c8f` | overfit test |
 | `5951d91`, `6459608` | attention.py: `enable_gqa` path and probe (track C, 6 Nov) |
+| `3557cd5` | attention.py: `repeat_interleave` default again, `enable_gqa` opt-in (12 Nov, decision S14) |
 
 How the pieces fit together:
 
@@ -116,21 +117,24 @@ self.q_proj = nn.Linear(d_model, n_heads    * head_dim, bias=False)  # 512 → 5
 self.k_proj = nn.Linear(d_model, n_kv_heads * head_dim, bias=False)  # 512 → 128 for GQA-2
 self.v_proj = nn.Linear(d_model, n_kv_heads * head_dim, bias=False)
 ...
-if self.n_rep > 1 and not _SDPA_HAS_GQA:             # fallback, torch without enable_gqa
+if self.n_rep > 1 and not _USE_ENABLE_GQA:           # default path
     k = k.repeat_interleave(self.n_rep, dim=1)       # [B, 2, T, 64] → [B, 8, T, 64]
     v = v.repeat_interleave(self.n_rep, dim=1)
-gqa_kw = {"enable_gqa": True} if (self.n_rep > 1 and _SDPA_HAS_GQA) else {}
+gqa_kw = {"enable_gqa": True} if (self.n_rep > 1 and _USE_ENABLE_GQA) else {}
 ```
 
-Each K/V head has to serve `n_rep = n_heads // n_kv_heads` query heads. With
-`enable_gqa=True`, SDPA does that grouping itself and we pass K/V at 2 heads.
-`_probe_sdpa_gqa` decides this at import by making a real SDPA call, because
-SDPA is a C builtin and `inspect.signature` raises on it. On torch without the
-argument, `repeat_interleave` expands K/V first and the rest is plain MHA.
+Each K/V head has to serve `n_rep = n_heads // n_kv_heads` query heads. By
+default `repeat_interleave` expands K/V to all 8 heads right before SDPA, and
+the rest is plain MHA (the cache still stores 2 heads). With the opt-in
+`SLM_SDPA_ENABLE_GQA=1`, read once at import, and only if `_probe_sdpa_gqa`
+finds support (a real SDPA call, because SDPA is a C builtin and
+`inspect.signature` raises on it), K/V go to SDPA at 2 heads with
+`enable_gqa=True` and SDPA does the grouping. That was the default from 6 to
+12 Nov; it was reverted after the T4 benchmark (design row 7, decision S14).
 
 Both paths give the same grouping: 0,0,0,0,1,1,1,1, each group contiguous.
 Plain `repeat` would give 0,1,0,1,… which is a different (wrong) grouping, and
-a test catches it in the fallback. With `n_kv_heads == n_heads`, `n_rep = 1`,
+a test catches it. With `n_kv_heads == n_heads`, `n_rep = 1`,
 neither path applies, and the class *is* standard MHA (tested against a
 reference).
 
@@ -227,7 +231,7 @@ checks the other. Run `python -m slm.utils.params` for the table in section 3.
 All of them use random token IDs (`torch.randint(0, 4096, (2, 16))`), so none
 need the tokenizer. Each was also checked to **fail** on a deliberately broken
 model. Re-run on the final code (2026-11-09): no causal mask, `repeat` instead
-of `repeat_interleave` in the fallback, `enable_gqa` missing on the cached
+of `repeat_interleave` on the default path, `enable_gqa` missing on the cached
 branch, a cached mask without the `T − S` offset, and RoPE ignoring `start_pos`
 were each caught.
 
@@ -243,7 +247,7 @@ were each caught.
 | 4 | RoPE cos/sin as `persistent=False` buffers | Normal buffers; recompute every forward | They move with `.to(device)` but stay out of checkpoints, since they can always be rebuilt. |
 | 5 | fp32 maths inside RMSNorm and RoPE, cast back after | Whatever dtype comes in | C trains in fp16 on a T4. Squaring activations in fp16 overflows past 65,504. |
 | 6 | `F.scaled_dot_product_attention` (fused) | Hand-written softmax | Faster and lower-memory. The hand-written version lives in the test as the reference. |
-| 7 | SDPA's `enable_gqa=True` when torch supports it (`_probe_sdpa_gqa`), `repeat_interleave` as the fallback for older torch | `repeat_interleave` always (the original code); `expand`+`reshape` | Changed by track C on 6 Nov. `repeat_interleave` copied K/V to full size on every decode step: 2.15 GB written per generated token at batch 64, context 2048, fp16. In the T4 benchmark of that path, GQA decode was below MHA by 48 % at batch 64, context 1024 and by 52 % at context 2048. Same output on both paths (tested on CPU), and no weights changed, so the trained checkpoints are unaffected. |
+| 7 | `repeat_interleave` K/V to all heads before SDPA (default); SDPA's `enable_gqa=True` only as an opt-in (`SLM_SDPA_ENABLE_GQA=1` and `_probe_sdpa_gqa()`) | `enable_gqa` as the default (tried 6–12 Nov, track C); `expand`+`reshape` | `repeat_interleave` copies K/V on every decode step (2.15 GB per token at batch 64, context 2048, fp16), and on that path GQA decode was 48 % / 52 % below MHA at batch 64, context 1024 / 2048 (T4, 1 Nov). `enable_gqa` was meant to remove the copy, but on the T4 (sm_75, torch 2.11) it drops SDPA to the math backend and was worse: training −39.1 % vs MHA (spread 3.5 %, batch 48), training peak memory +58 %, decode slower at all 20 configs (−17 % to −71.3 % at context 1024, batch 64), OOM at context 2048, batch 64 where `repeat_interleave` completed. KV cache 4x smaller on both paths. Reverted 12 Nov; may differ on Ampere+ (FlashAttention), untested. Same output on both paths (tested on CPU), no weights changed. |
 | 8 | Explicit offset mask when the cache already holds tokens | Always `is_causal=True` | `is_causal` aligns the mask to the top-left, which is wrong when the queries are the last S of T keys. Needed for multi-token chunks on a non-empty cache. |
 | 9 | Dropout on embedding, attention probs, attention output, FFN output | Fewer places | The usual GPT-2 placement. `dropout = 0.0` in the config, so it is inactive anyway. |
 | 10 | GPT-2 init: N(0, 0.02), residual projections scaled by 1/√(2·n_layers) | PyTorch defaults | The default embedding is N(0, 1): tied logits would be about 22 wide at step 0. Measured initial loss with our init: 8.33, against ln(4096) = 8.32 (ideal). |
@@ -265,7 +269,7 @@ were each caught.
 ## 3. Test results
 
 ```
-tests/test_attention.py  11 passed
+tests/test_attention.py  18 passed
   mha_matches_reference                 n_kv_heads=8 output == naive per-head MHA (allclose)
   gqa_equals_mha_with_shared_kv_weights GQA-2 == MHA whose K/V heads are copied in groups
   variants_shapes [MHA, GQA-2, MQA]     projection sizes and output shape
@@ -273,6 +277,9 @@ tests/test_attention.py  11 passed
   enable_gqa_matches_repeat_interleave_fallback [8, 4, 2, 1]
                                         both paths forced; forward, prefill, cached steps
   probe_reports_false_on_torch_without_enable_gqa
+  default_kv_path_is_repeat_interleave  env unset -> K/V expanded to 8 heads, no enable_gqa keyword
+  env_opt_in_switches_path [5 cases]    only SLM_SDPA_ENABLE_GQA=1 on a supporting torch opts in
+  kv_path_reports_flag
 tests/test_model.py      22 passed
   output_shape [8, 2, 1]                (2, 16, 4096), finite
   causality [t = 1, 7, 15]              logits before t unchanged; at/after t changed
@@ -407,8 +414,8 @@ contract `model(x) → logits` works as she expects.
 5. **For the attention benchmark:** GQA's saving in this code is in *memory*
    (K/V projections and, above all, the KV cache), not attention FLOPs: all 8
    query heads are still scored against every key. `results/benchmark/benchmark.json`
-   (T4, fp16) was committed on 1 Nov, **before** the `enable_gqa` change, so it
-   measures the `repeat_interleave` path. GQA vs MHA decode tokens/s there:
+   (T4, fp16, 1 Nov) measures the `repeat_interleave` path, which is the
+   default again, so it describes the current code. GQA vs MHA decode tokens/s:
 
    | batch × context | MHA | GQA | GQA vs MHA |
    |---|---|---|---|
@@ -422,9 +429,17 @@ contract `model(x) → logits` works as she expects.
    GQA also has the wider FFN (1664 against 1408), and the benchmark can't
    separate that from the copy, so the −12 to −13 % at batch 64 and short
    context shouldn't be put down to the copy alone.
-   **`enable_gqa` has not been re-benchmarked on the T4.** On CPU (torch 2.14.1),
-   one SDPA call at batch 64, context 2048 took 6.7 ms with `enable_gqa` against
-   64 ms with `repeat_interleave`. That says nothing about the T4.
+   **The `enable_gqa` (opt-in) path was benchmarked on a Kaggle T4** (sm_75,
+   torch 2.11) and is worse: SDPA drops to the math backend. GQA training
+   −39.1 % vs MHA (spread 3.5 %, `--train-batch 48`), training peak memory
+   +58 % vs MHA, decode slower than MHA at all 20 configs (−17 % to −71.3 %,
+   the worst at context 1024, batch 64), and OOM at context 2048, batch 64,
+   where the `repeat_interleave` run completed. KV cache exactly 4x smaller,
+   as on the default path. Hence the revert (decision S14). The file goes in
+   `results/benchmark_enable_gqa/benchmark.json` once committed; `make_results.py`
+   labels it "enable_gqa (opt-in) path, T4". (On CPU, torch 2.14.1, one SDPA
+   call at batch 64, context 2048 took 6.7 ms with `enable_gqa` against 64 ms
+   with `repeat_interleave`, which shows CPU timings don't transfer to the T4.)
 
 6. **Merging:** done. `track/model`, `track/training` and `track/tokenizer` are
    all in `main`.
@@ -500,12 +515,18 @@ contract `model(x) → logits` works as she expects.
     `tril(diagonal=T−S)` fixes that, and `test_chunked_prefill_matches_full_forward`
     checks it.
 
-12. **Why `enable_gqa` instead of `repeat_interleave`, and does the answer
-    change?** `repeat_interleave` copied K/V to all 8 heads on every decode step,
-    2.15 GB per generated token at batch 64, context 2048, fp16, which threw away
-    the benefit of the small cache: in the T4 benchmark GQA decoded 52 % slower
-    than MHA there. `enable_gqa` lets SDPA group the heads without us making that
-    copy. The output is the same: `test_enable_gqa_matches_repeat_interleave_fallback`
-    forces both paths on the same weights and compares forward and cached steps
-    (CPU). The benchmark predates the change, so the speed-up on the T4 is not
-    measured.
+12. **Why `repeat_interleave` and not SDPA's `enable_gqa`?** We tried
+    `enable_gqa` as the default (6 Nov), because `repeat_interleave` copies K/V
+    to all 8 heads on every decode step (2.15 GB per generated token at batch
+    64, context 2048, fp16) and GQA decoded 52 % slower than MHA there. Then we
+    measured it on the T4 (sm_75, torch 2.11): `enable_gqa=True` makes SDPA
+    fall back to the math backend, so it was worse everywhere except the cache.
+    GQA training −39.1 % vs MHA, training peak memory +58 %, decode slower at
+    all 20 configs (down to −71.3 % at context 1024, batch 64), and OOM at
+    context 2048, batch 64, where `repeat_interleave` finished. The KV cache is
+    4x smaller on both paths, since it stores K/V at 2 heads either way. So
+    `repeat_interleave` is the default again and `enable_gqa` is an opt-in
+    (`SLM_SDPA_ENABLE_GQA=1`). On Ampere or newer, with FlashAttention, it might
+    win; we haven't tested that. The output is the same on both paths:
+    `test_enable_gqa_matches_repeat_interleave_fallback` forces both on the same
+    weights and compares forward and cached steps (CPU).

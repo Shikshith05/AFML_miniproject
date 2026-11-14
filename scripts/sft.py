@@ -3,6 +3,13 @@
     python scripts/sft.py --preset gqa --checkpoint checkpoints/gqa_base/final.pt
     python scripts/sft.py --preset mha --checkpoint checkpoints/mha_base/final.pt
 
+    # human-written data, kept apart from the Alpaca run:
+    python scripts/sft.py --preset gqa --checkpoint checkpoints/gqa_base/final.pt         --dataset oasst1 --run-name gqa_sft_oasst1
+
+Output: checkpoints/<run-name>/{epoch_*,final}.pt and
+results/<run-name>/metrics.jsonl, where --run-name defaults to <preset>_sft
+(gqa_sft is the Alpaca run).
+
 Run it on both presets: that is what shows whether GQA's quality parity
 survives instruction tuning, not just pretraining.
 
@@ -28,7 +35,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--preset", choices=["mha", "gqa"], required=True)
     p.add_argument("--checkpoint", type=str, required=True,
                    help="pretrained checkpoint to start from")
-    p.add_argument("--run-name", type=str, default=None)
+    p.add_argument("--run-name", type=str, default=None,
+                   help="output folder name under checkpoints/ and results/ "
+                        "(default: <preset>_sft). Use a new one per dataset, "
+                        "e.g. gqa_sft_oasst1, so earlier runs are not overwritten")
     p.add_argument("--epochs", type=int, default=None)
     p.add_argument("--lr", type=float, default=None)
     p.add_argument("--micro-batch-size", type=int, default=None)
@@ -41,11 +51,24 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+def warn_if_run_exists(run_name: str) -> None:
+    """The metrics log appends and checkpoints are replaced, so reusing a run
+    name mixes two runs. Not fatal (re-running on purpose is legitimate), but
+    loud."""
+    old = [p for p in (Path("results") / run_name / "metrics.jsonl",
+                       Path("checkpoints") / run_name / "final.pt") if p.exists()]
+    if old:
+        print(f"WARNING: run '{run_name}' already has {', '.join(map(str, old))}. "
+              "The log will be appended to and the checkpoints replaced; pass a "
+              "different --run-name to keep the earlier run.")
+
+
 def main() -> int:
     args = parse_args()
 
     cfg: Config = {"mha": mha_baseline, "gqa": gqa_base}[args.preset]()
-    cfg.run_name = args.run_name or f"{args.preset}_base"
+    run_name = args.run_name or f"{args.preset}_sft"
+    cfg.run_name = run_name
     if args.epochs is not None:
         cfg.sft.epochs = args.epochs
     if args.lr is not None:
@@ -59,6 +82,7 @@ def main() -> int:
         cfg.train.device, cfg.train.precision = "cpu", "fp32"
 
     print(cfg.summary())
+    print(f"  SFT data {cfg.sft.dataset_name}  ->  checkpoints/{run_name}/, results/{run_name}/")
     print()
 
     tok = Tokenizer.load(cfg.data.tokenizer_path)
@@ -95,8 +119,8 @@ def main() -> int:
     )
     print(f"loaded {ckpt} (pretrained to step {state['step']})")
 
-    sft(model, cfg, tok, train_examples, val_examples,
-        run_name=f"{args.preset}_sft")
+    warn_if_run_exists(run_name)
+    sft(model, cfg, tok, train_examples, val_examples, run_name=run_name)
     return 0
 
 

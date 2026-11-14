@@ -1,0 +1,546 @@
+"""Build every figure and table for the write-up from results/ alone.
+
+    python scripts/make_results.py
+
+Reads only files under results/ (no checkpoints, no datasets, no GPU) and
+takes seconds. Writes:
+
+  results/figures/*.png, *.pdf    figures (PDF for the paper, PNG for the README)
+  results/tables/*.md,  *.tex     tables (Markdown for the README, LaTeX for the paper)
+
+Inputs, each optional -- a missing one just skips its outputs:
+
+  results/{mha_base,gqa_base}/metrics.jsonl   pretraining logs
+  results/benchmark*/benchmark.json           every benchmark folder, e.g.
+                                              results/benchmark (1 Nov, default
+                                              repeat_interleave path) and
+                                              results/benchmark_enable_gqa (opt-in path)
+  results/gqa_sft*/, results/gqa_dpo*/        fine-tuning logs, any dataset suffix
+  results/eval*/metrics.json                  evaluation, e.g. results/eval (Alpaca)
+                                              and results/eval_oasst1
+
+Each benchmark figure and table is captioned with the K/V path it measured.
+results/benchmark (1 Nov) records no provenance but measured the default
+repeat_interleave path, and is labelled so; --benchmark-note, if given,
+replaces that caption. A run that records its own provenance (torch version,
+kv_path / sdpa_enable_gqa, commit, date) is labelled from that, and
+results/benchmark_enable_gqa as "enable_gqa (opt-in) path, T4". When both
+exist, a side-by-side table compares GQA vs MHA on each path.
+
+Owner: shared (write-up).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402
+
+REPO = Path(__file__).resolve().parents[1]
+
+# Fixed categorical order (validated default palette): slot 1 blue, 2 orange, 3 aqua.
+# The colour follows the entity everywhere: MHA blue / GQA orange; base, SFT, DPO.
+COLORS = {"mha": "#2a78d6", "gqa": "#eb6834",
+          "base": "#2a78d6", "sft": "#eb6834", "dpo": "#1baf7a"}
+INK, INK_2, GRID = "#0b0b0b", "#52514e", "#e4e3df"
+LABEL = {"mha": "MHA (8 KV heads)", "gqa": "GQA (2 KV heads)",
+         "base": "base", "sft": "SFT", "dpo": "DPO"}
+
+plt.rcParams.update({
+    "font.size": 9, "axes.titlesize": 10, "axes.labelsize": 9,
+    "axes.edgecolor": INK_2, "axes.labelcolor": INK, "text.color": INK,
+    "xtick.color": INK_2, "ytick.color": INK_2, "axes.grid": True,
+    "grid.color": GRID, "grid.linewidth": 0.6, "axes.axisbelow": True,
+    "axes.spines.top": False, "axes.spines.right": False,
+    "legend.frameon": False, "lines.linewidth": 2, "savefig.dpi": 200,
+    "figure.facecolor": "white", "axes.facecolor": "white",
+})
+
+
+# -- reading --------------------------------------------------------------------
+
+def read_jsonl(path: Path) -> list[dict]:
+    rows = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line:
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError:     # a killed run can leave a torn last line
+                pass
+    return rows
+
+
+def events(rows: list[dict], name: str) -> list[dict]:
+    return [r for r in rows if r.get("event") == name]
+
+
+def start_config(rows: list[dict]) -> dict:
+    s = [r for r in rows if r.get("event") == "start" and "config" in r]
+    return s[0]["config"] if s else {}
+
+
+def suffix_of(folder: str, stem: str) -> str:
+    """results/eval_oasst1 -> '_oasst1'; results/eval -> ''."""
+    return folder[len(stem):]
+
+
+def chain_name(suffix: str) -> str:
+    return suffix.lstrip("_") or "alpaca"
+
+
+# -- writing --------------------------------------------------------------------
+
+def save_fig(fig, out_dir: Path, name: str) -> list[Path]:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    paths = [out_dir / f"{name}.png", out_dir / f"{name}.pdf"]
+    # fixed metadata so re-running on unchanged results gives unchanged files
+    fig.savefig(paths[0], bbox_inches="tight", metadata={"Software": None})
+    fig.savefig(paths[1], bbox_inches="tight", metadata={"CreationDate": None, "Creator": None})
+    plt.close(fig)
+    return paths
+
+
+def tex_escape(s: str) -> str:
+    s = str(s)
+    for a, b in [("\\", r"\textbackslash{}"), ("&", r"\&"), ("%", r"\%"), ("$", r"\$"),
+                 ("#", r"\#"), ("_", r"\_"), ("{", r"\{"), ("}", r"\}"),
+                 ("~", r"\textasciitilde{}"), ("^", r"\textasciicircum{}")]:
+        s = s.replace(a, b)
+    s = s.replace("−", "$-$").replace("×", r"$\times$").replace("→", r"$\rightarrow$")
+    return s
+
+
+def save_table(out_dir: Path, name: str, title: str, header: list[str], rows: list[list],
+               notes: list[str] = ()) -> list[Path]:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    md = [f"**{title}**", "", "| " + " | ".join(header) + " |",
+          "|" + "|".join("---" for _ in header) + "|"]
+    md += ["| " + " | ".join(str(c) for c in r) + " |" for r in rows]
+    md += [""] + [f"*{n}*" for n in notes]
+    (out_dir / f"{name}.md").write_text("\n".join(md).rstrip() + "\n", encoding="utf-8")
+
+    tex = [r"% generated by scripts/make_results.py -- do not edit by hand",
+           r"\begin{table}[t]", r"\centering", r"\small",
+           r"\begin{tabular}{l" + "r" * (len(header) - 1) + "}", r"\toprule",
+           " & ".join(tex_escape(h) for h in header) + r" \\", r"\midrule"]
+    tex += [" & ".join(tex_escape(c) for c in r) + r" \\" for r in rows]
+    tex += [r"\bottomrule", r"\end{tabular}"]
+    caption = tex_escape(title) + "".join(" " + tex_escape(n) for n in notes)
+    tex += [rf"\caption{{{caption}}}", rf"\label{{tab:{name}}}", r"\end{table}"]
+    (out_dir / f"{name}.tex").write_text("\n".join(tex) + "\n", encoding="utf-8")
+    return [out_dir / f"{name}.md", out_dir / f"{name}.tex"]
+
+
+def fmt_int(x) -> str:
+    return f"{x:,.0f}"
+
+
+def pct(x: float) -> str:
+    return f"{x:+.1f}%".replace("-", "−")
+
+
+def note_under(fig, text: str | None) -> None:
+    if text:
+        fig.text(0.01, -0.02, text, ha="left", va="top", fontsize=8, color=INK_2, wrap=True)
+
+
+# -- pretraining ----------------------------------------------------------------
+
+def pretrain(results: Path, figs: Path, tables: Path) -> tuple[list[Path], dict]:
+    runs = {v: results / f"{v}_base" / "metrics.jsonl" for v in ("mha", "gqa")}
+    runs = {v: read_jsonl(p) for v, p in runs.items() if p.exists()}
+    if not runs:
+        return [], {}
+    out, summary = [], {}
+
+    fig, ax = plt.subplots(figsize=(6.0, 3.2))
+    for v, rows in runs.items():
+        tr = events(rows, "train")
+        ev = events(rows, "eval")
+        if tr:
+            ax.plot([r["step"] for r in tr], [r["loss"] for r in tr], color=COLORS[v],
+                    alpha=0.25, linewidth=1)
+        if ev:
+            ax.plot([r["step"] for r in ev], [r["val_loss"] for r in ev], color=COLORS[v],
+                    label=f"{LABEL[v]}, validation", marker="o", markersize=3)
+    ax.set_xlabel("step")
+    ax.set_ylabel("loss (nats/token)")
+    ax.set_title("Pretraining on TinyStories: validation loss (train loss faint)", loc="left")
+    ax.set_ylim(top=min(4.0, ax.get_ylim()[1]))
+    ax.legend()
+    out += save_fig(fig, figs, "pretrain_loss")
+
+    # zoom on the last third, where the two curves are compared
+    fig, ax = plt.subplots(figsize=(6.0, 3.0))
+    for v, rows in runs.items():
+        ev = events(rows, "eval")
+        if ev:
+            cut = ev[len(ev) // 3:]
+            ax.plot([r["step"] for r in cut], [r["val_loss"] for r in cut], color=COLORS[v],
+                    label=LABEL[v], marker="o", markersize=3)
+    ax.set_xlabel("step")
+    ax.set_ylabel("validation loss")
+    ax.set_title("Validation loss, last two thirds of training", loc="left")
+    ax.legend()
+    out += save_fig(fig, figs, "pretrain_val_loss_zoom")
+
+    rows_t = []
+    for v, rows in runs.items():
+        cfg = start_config(rows)
+        m, t = cfg.get("model", {}), cfg.get("train", {})
+        done = (events(rows, "done") or [{}])[-1]
+        steps = done.get("step") or t.get("max_steps")
+        tok_step = t.get("micro_batch_size", 0) * t.get("grad_accum_steps", 0) * m.get("max_seq_len", 0)
+        wall = done.get("wall_s")
+        kv = 2 * m.get("n_layers", 0) * m.get("n_kv_heads", 0) * (m.get("d_model", 0) // max(1, m.get("n_heads", 1))) \
+            * m.get("max_seq_len", 0) * 2
+        summary[v] = {"val_loss": done.get("val_loss"), "val_ppl": done.get("val_ppl"),
+                      "steps": steps, "wall_h": wall / 3600 if wall else None,
+                      "tokens": steps * tok_step if steps else None, "kv_mb": kv / 1e6,
+                      "n_kv_heads": m.get("n_kv_heads"), "ffn_hidden": m.get("ffn_hidden")}
+        s = summary[v]
+        rows_t.append([LABEL[v], m.get("n_kv_heads", "-"), m.get("ffn_hidden", "-"),
+                       fmt_int(steps) if steps else "-",
+                       f"{s['tokens'] / 1e6:,.0f}M" if s["tokens"] else "-",
+                       f"{s['val_loss']:.4f}" if s["val_loss"] is not None else "-",
+                       f"{s['val_ppl']:.3f}" if s["val_ppl"] is not None else "-",
+                       f"{s['kv_mb']:.2f}",
+                       f"{s['wall_h']:.2f}" if s["wall_h"] else "-"])
+    out += save_table(tables, "pretrain", "Pretraining: MHA vs GQA, parameter-matched (27,795,968 each)",
+                      ["model", "KV heads", "ffn_hidden", "steps", "tokens", "final val loss",
+                       "final val ppl", "KV cache MB (seq 512, fp16)", "wall time h (T4)"],
+                      rows_t,
+                      ["Final values are the 'done' event of results/<run>/metrics.jsonl.",
+                       "Wall times come from two different Kaggle sessions, so they are not a "
+                       "speed comparison; see the benchmark table for that."])
+    return out, summary
+
+
+# -- benchmark ------------------------------------------------------------------
+
+def _gpu_short(b: dict) -> str:
+    gpu = str(b.get("gpu", "?"))
+    return "T4" if "T4" in gpu else gpu
+
+
+def bench_path(folder: str, b: dict) -> str:
+    """Short name of the K/V path a benchmark file measured, with its GPU."""
+    if "kv_path" in b:
+        opt_in = b["kv_path"] == "sdpa_enable_gqa"
+    elif "sdpa_enable_gqa" in b:
+        opt_in = bool(b["sdpa_enable_gqa"])
+    else:
+        # no provenance: the 1 Nov file predates enable_gqa (repeat_interleave);
+        # a benchmark_enable_gqa folder is named after its path
+        opt_in = folder == "benchmark_enable_gqa"
+    path = "enable_gqa (opt-in) path" if opt_in else "repeat_interleave (default) path"
+    return f"{path}, {_gpu_short(b)}"
+
+
+def bench_label(folder: str, b: dict, note: str | None) -> str:
+    if "sdpa_enable_gqa" in b or "kv_path" in b:
+        date = str(b.get("date_utc", ""))[:10]
+        return (f"{bench_path(folder, b)}. Measured {date} on {b.get('gpu', '?')}, "
+                f"torch {b.get('torch_version', '?')}, commit {str(b.get('git_commit') or '?')[:7]}.")
+    if folder == "benchmark" and note:
+        return note
+    if folder == "benchmark":
+        return f"{bench_path(folder, b)}. Measured 1 Nov on {b.get('gpu', '?')}; provenance not recorded in the file."
+    return f"{bench_path(folder, b)}. {b.get('gpu', '?')}, provenance not recorded."
+
+
+def benchmark(results: Path, figs: Path, tables: Path, note: str | None) -> tuple[list[Path], dict]:
+    out, loaded = [], {}
+    for path in sorted(results.glob("benchmark*/benchmark.json")):
+        loaded[path.parent.name] = json.loads(path.read_text(encoding="utf-8"))
+
+    for folder, b in loaded.items():
+        sfx = suffix_of(folder, "benchmark")
+        caption = bench_label(folder, b, note)
+        inf = b.get("inference", [])
+        batches = sorted({r["batch_size"] for r in inf})
+        ctxs = sorted({r["context_len"] for r in inf})
+        get = {(r["variant"], r["batch_size"], r["context_len"]): r for r in inf}
+
+        # decode throughput: one panel per batch size, one shared y-scale per panel
+        if inf:
+            fig, axes = plt.subplots(1, len(batches), figsize=(2.3 * len(batches), 2.8))
+            axes = [axes] if len(batches) == 1 else list(axes)
+            for ax, bs in zip(axes, batches):
+                for v in ("mha", "gqa"):
+                    pts = [(c, get[(v, bs, c)]["decode_tokens_per_s"]) for c in ctxs if (v, bs, c) in get]
+                    if pts:
+                        ax.plot(*zip(*pts), color=COLORS[v], marker="o", markersize=4, label=LABEL[v])
+                ax.set_xscale("log", base=2)
+                ax.set_xticks(ctxs, [str(c) for c in ctxs], rotation=45)
+                ax.set_title(f"batch {bs}", loc="left")
+                ax.set_xlabel("context length")
+                ax.set_ylim(bottom=0)
+            axes[0].set_ylabel("decode tokens/s")
+            axes[-1].legend(loc="lower left", fontsize=7)
+            fig.suptitle(f"Decode throughput, {b.get('gpu', '')} {b.get('precision', '')}",
+                         x=0.01, ha="left", fontsize=10)
+            fig.tight_layout()
+            note_under(fig, caption)
+            out += save_fig(fig, figs, f"benchmark_decode{sfx}")
+
+            # KV cache and peak memory at the largest batch
+            bs = batches[-1]
+            fig, axes = plt.subplots(1, 2, figsize=(6.4, 2.8))
+            for v in ("mha", "gqa"):
+                pts = [(c, get[(v, bs, c)]) for c in ctxs if (v, bs, c) in get]
+                if pts:
+                    axes[0].plot([c for c, _ in pts], [r["kv_cache_bytes_measured"] / 1e6 for _, r in pts],
+                                 color=COLORS[v], marker="o", markersize=4, label=LABEL[v])
+                    axes[1].plot([c for c, _ in pts], [r["peak_gb"] for _, r in pts],
+                                 color=COLORS[v], marker="o", markersize=4, label=LABEL[v])
+            for ax, yl, t in [(axes[0], "KV cache (MB)", "KV cache size"),
+                              (axes[1], "peak GPU memory (GB)", "Peak memory while decoding")]:
+                ax.set_xscale("log", base=2)
+                ax.set_xticks(ctxs, [str(c) for c in ctxs])
+                ax.set_xlabel("context length")
+                ax.set_ylabel(yl)
+                ax.set_title(f"{t}, batch {bs}", loc="left")
+                ax.set_ylim(bottom=0)
+            axes[0].legend(fontsize=7)
+            fig.tight_layout()
+            note_under(fig, caption)
+            out += save_fig(fig, figs, f"benchmark_memory{sfx}")
+
+        rows_t = []
+        for bs in batches:
+            for c in ctxs:
+                m, g = get.get(("mha", bs, c)), get.get(("gqa", bs, c))
+                if not (m and g):
+                    continue
+                rows_t.append([bs, c, f"{m['decode_tokens_per_s']:,.1f}", f"{g['decode_tokens_per_s']:,.1f}",
+                               pct((g["decode_tokens_per_s"] / m["decode_tokens_per_s"] - 1) * 100),
+                               f"{m['kv_cache_bytes_measured'] / 1e6:,.1f}",
+                               f"{g['kv_cache_bytes_measured'] / 1e6:,.1f}",
+                               f"{m['peak_gb']:.2f}", f"{g['peak_gb']:.2f}"])
+        tr = b.get("training", {})
+        notes = [caption]
+        if tr.get("summary"):
+            s = tr["summary"]
+            notes.append(f"Training step throughput (same session, interleaved): MHA "
+                         f"{s['mha']['tokens_per_s_mean']:,.0f} tok/s, GQA {s['gqa']['tokens_per_s_mean']:,.0f} "
+                         f"tok/s ({pct(tr['gqa_vs_mha_pct'])}, run-to-run spread {tr['spread_pct']:.1f}%).")
+        out += save_table(tables, f"benchmark{sfx}",
+                          f"Inference benchmark ({folder}): decode throughput and memory",
+                          ["batch", "context", "MHA tok/s", "GQA tok/s", "GQA vs MHA",
+                           "MHA KV MB", "GQA KV MB", "MHA peak GB", "GQA peak GB"], rows_t, notes)
+
+    # side by side, when another run exists next to the 1 Nov (default-path) file
+    if "benchmark" in loaded and len(loaded) > 1:
+        old = {(r["variant"], r["batch_size"], r["context_len"]): r for r in loaded["benchmark"]["inference"]}
+        for folder, b in loaded.items():
+            if folder == "benchmark":
+                continue
+            new = {(r["variant"], r["batch_size"], r["context_len"]): r for r in b.get("inference", [])}
+            keys = sorted({(bs, c) for (_, bs, c) in new} & {(bs, c) for (_, bs, c) in old})
+            rows_t = []
+            for bs, c in keys:
+                try:
+                    o = old[("gqa", bs, c)]["decode_tokens_per_s"] / old[("mha", bs, c)]["decode_tokens_per_s"] - 1
+                    n = new[("gqa", bs, c)]["decode_tokens_per_s"] / new[("mha", bs, c)]["decode_tokens_per_s"] - 1
+                except KeyError:
+                    continue
+                rows_t.append([bs, c, f"{old[('gqa', bs, c)]['decode_tokens_per_s']:,.1f}",
+                               f"{new[('gqa', bs, c)]['decode_tokens_per_s']:,.1f}",
+                               pct(o * 100), pct(n * 100)])
+            left, right = bench_path("benchmark", loaded["benchmark"]), bench_path(folder, b)
+            out += save_table(tables, f"benchmark_side_by_side{suffix_of(folder, 'benchmark')}",
+                              f"GQA decode throughput: {left} (results/benchmark) vs {right} ({folder})",
+                              ["batch", "context", "GQA tok/s (benchmark)", f"GQA tok/s ({folder})",
+                               "GQA vs MHA (benchmark)", f"GQA vs MHA ({folder})"], rows_t,
+                              [f"results/benchmark: {bench_label('benchmark', loaded['benchmark'], note)}",
+                               f"results/{folder}: {bench_label(folder, b, note)}",
+                               "Each ratio is within one session; compare ratios, not absolute tok/s, across sessions. "
+                               "A missing row is a config one run did not complete (e.g. OOM)."])
+    return out, loaded
+
+
+# -- fine-tuning ----------------------------------------------------------------
+
+def finetune(results: Path, figs: Path) -> list[Path]:
+    out = []
+    sft = {suffix_of(p.parent.name, "gqa_sft"): read_jsonl(p) for p in sorted(results.glob("gqa_sft*/metrics.jsonl"))}
+    dpo = {suffix_of(p.parent.name, "gqa_dpo"): read_jsonl(p) for p in sorted(results.glob("gqa_dpo*/metrics.jsonl"))}
+    for sfx in sorted(set(sft) | set(dpo)):
+        panels = [(k, d[sfx]) for k, d in (("sft", sft), ("dpo", dpo)) if sfx in d]
+        fig, axes = plt.subplots(1, len(panels), figsize=(3.3 * len(panels), 2.9))
+        axes = [axes] if len(panels) == 1 else list(axes)
+        for ax, (kind, rows) in zip(axes, panels):
+            tr, ev = events(rows, "train"), events(rows, "eval")
+            if kind == "sft":
+                ax.plot([r["step"] for r in tr], [r["loss"] for r in tr], color=COLORS["sft"],
+                        alpha=0.35, linewidth=1, label="train (masked)")
+                ax.plot([r["step"] for r in ev], [r["val_loss"] for r in ev], color=COLORS["sft"],
+                        marker="o", markersize=5, label="validation")
+                ax.set_ylabel("response loss")
+                ax.set_title(f"SFT ({chain_name(sfx)})", loc="left")
+            else:
+                ax.plot([r["step"] for r in tr], [r["reward_acc"] for r in tr], color=COLORS["dpo"],
+                        alpha=0.5, linewidth=1, label="train reward acc")
+                # only before/after each epoch: points, not a line implying a trend in between
+                ax.plot([r["step"] for r in ev], [r["reward_acc"] for r in ev], color=COLORS["dpo"],
+                        marker="o", markersize=7, linestyle="none", label="held-out reward acc")
+                ax.set_ylim(-0.02, 1.02)
+                ax.set_ylabel("reward accuracy")
+                ax.set_title(f"DPO from SFT ({chain_name(sfx)})", loc="left")
+            ax.set_xlabel("step")
+            ax.legend(fontsize=7)
+        fig.tight_layout()
+        out += save_fig(fig, figs, f"finetune{sfx}")
+    return out
+
+
+# -- evaluation -----------------------------------------------------------------
+
+def evaluation(results: Path, figs: Path, tables: Path) -> tuple[list[Path], dict]:
+    out, loaded = [], {}
+    for path in sorted(results.glob("eval*/metrics.json")):
+        loaded[suffix_of(path.parent.name, "eval")] = json.loads(path.read_text(encoding="utf-8"))
+    for sfx, metrics in loaded.items():
+        name = chain_name(sfx)
+        rows_t = []
+        for model, m in metrics.items():
+            p, g = m.get("preference", {}), m.get("generation", {})
+            ir = m.get("implicit_reward_vs_sft", {})
+            rows_t.append([LABEL.get(model, model), m.get("sft_dataset") or ("-" if model == "base" else name),
+                           f"{m['perplexity']['ppl']:.3f}" if "perplexity" in m else "-",
+                           f"{p['acc_sum']:.3f}" if "acc_sum" in p else "-",
+                           f"{p['acc_mean']:.3f}" if "acc_mean" in p else "-",
+                           f"{ir['reward_acc']:.3f}" if ir else "-",
+                           f"{g['eos_rate']:.2f}" if g else "-",
+                           f"{g['distinct_2']:.3f}" if g else "-",
+                           f"{g['mean_tokens']:.1f}" if g else "-"])
+        n_pairs = next((m["preference"]["n_pairs"] for m in metrics.values() if "preference" in m), None)
+        out += save_table(tables, f"eval{sfx}", f"Evaluation of the GQA chain, SFT data: {name}",
+                          ["model", "SFT data", "story ppl", "pref acc (sum)", "pref acc (per-token)",
+                           "DPO reward acc vs SFT", "eos rate", "distinct-2", "mean tokens"], rows_t,
+                          ["story ppl: held-out TinyStories validation stories (forgetting check). "
+                           f"Preference accuracy: {n_pairs or '?'} held-out pairs, real ending vs weak checkpoint's. "
+                           "Generation scores: 12 fixed prompts, same seed per prompt."])
+
+    if loaded:
+        # one panel per chain, grouped bars: per-token preference accuracy and summed
+        fig, axes = plt.subplots(1, len(loaded), figsize=(3.4 * len(loaded), 3.0), sharey=True)
+        axes = [axes] if len(loaded) == 1 else list(axes)
+        for ax, (sfx, metrics) in zip(axes, loaded.items()):
+            models = [k for k in ("base", "sft", "dpo") if k in metrics and "preference" in metrics[k]]
+            w = 0.38
+            for j, (key, lab, alpha) in enumerate([("acc_mean", "per-token", 1.0), ("acc_sum", "summed", 0.45)]):
+                for i, mdl in enumerate(models):
+                    val = metrics[mdl]["preference"][key]
+                    ax.bar(i + (j - 0.5) * (w + 0.02), val, w, color=COLORS[mdl], alpha=alpha,
+                           edgecolor="white", linewidth=1)
+                    ax.text(i + (j - 0.5) * (w + 0.02), val + 0.01, f"{val:.2f}", ha="center",
+                            va="bottom", fontsize=7, color=INK_2)
+            ax.set_xticks(range(len(models)), [LABEL[m] for m in models])
+            ax.set_ylim(0, 1.08)
+            ax.axhline(0.5, color=INK_2, linewidth=0.8, linestyle=":")
+            ax.set_title(f"SFT data: {chain_name(sfx)}", loc="left")
+        axes[0].set_ylabel("preference accuracy")
+        from matplotlib.patches import Patch
+        axes[-1].legend(handles=[Patch(color=INK_2, alpha=1.0, label="per-token (solid)"),
+                                 Patch(color=INK_2, alpha=0.45, label="summed (light)")],
+                        loc="lower right", fontsize=7)
+        fig.suptitle("Does the model prefer the real story ending? (dotted: chance)",
+                     x=0.01, ha="left", fontsize=10)
+        fig.tight_layout()
+        out += save_fig(fig, figs, "eval_preference")
+    return out, loaded
+
+
+# -- headline table -------------------------------------------------------------
+
+def main_table(tables: Path, pre: dict, bench: dict, evals: dict, note: str | None) -> list[Path]:
+    rows, notes = [], []
+    if pre:
+        def both(f):
+            return [f(pre[v]) if v in pre else "-" for v in ("mha", "gqa")]
+        rows.append(["KV heads"] + both(lambda s: s["n_kv_heads"]))
+        rows.append(["ffn_hidden (S7: parameter-matched)"] + both(lambda s: s["ffn_hidden"]))
+        rows.append(["final val loss, 12k steps"] + both(lambda s: f"{s['val_loss']:.4f}"))
+        rows.append(["final val perplexity"] + both(lambda s: f"{s['val_ppl']:.3f}"))
+        rows.append(["KV cache, seq 512, fp16 (MB)"] + both(lambda s: f"{s['kv_mb']:.2f}"))
+    for folder, b in bench.items():
+        tr = b.get("training", {}).get("summary")
+        tag = ("1 Nov, " if folder == "benchmark" else "") + bench_path(folder, b).replace(" path", "")
+        if tr:
+            rows.append([f"training tok/s, same session ({tag})",
+                         fmt_int(tr["mha"]["tokens_per_s_mean"]), fmt_int(tr["gqa"]["tokens_per_s_mean"])])
+        inf = {(r["variant"], r["batch_size"], r["context_len"]): r for r in b.get("inference", [])}
+        for bs, c in [(1, 2048), (64, 2048)]:
+            if ("mha", bs, c) in inf and ("gqa", bs, c) in inf:
+                rows.append([f"decode tok/s, batch {bs}, context {c} ({tag})",
+                             f"{inf[('mha', bs, c)]['decode_tokens_per_s']:,.1f}",
+                             f"{inf[('gqa', bs, c)]['decode_tokens_per_s']:,.1f}"])
+        notes.append(f"{tag}: {bench_label(folder, b, note)}")
+    out = []
+    if rows:
+        out += save_table(tables, "main_results", "MHA vs GQA (27,795,968 parameters each)",
+                          ["", "MHA", "GQA"], rows, notes)
+
+    rows = []
+    for sfx, metrics in evals.items():
+        for model in ("base", "sft", "dpo"):
+            m = metrics.get(model)
+            if not m:
+                continue
+            p = m.get("preference", {})
+            ir = m.get("implicit_reward_vs_sft", {})
+            rows.append([f"{LABEL[model]}" + ("" if model == "base" else f" ({chain_name(sfx)})"),
+                         f"{m['perplexity']['ppl']:.3f}" if "perplexity" in m else "-",
+                         f"{p['acc_sum']:.3f}" if p else "-", f"{p['acc_mean']:.3f}" if p else "-",
+                         f"{ir['reward_acc']:.3f}" if ir else "-"])
+    if rows:
+        out += save_table(tables, "main_alignment", "GQA model through SFT and DPO",
+                          ["model", "story ppl", "pref acc (sum)", "pref acc (per-token)",
+                           "DPO reward acc vs SFT"], rows,
+                          ["Full tables: results/tables/eval.md, plus eval_<dataset>.md per extra SFT dataset."])
+    return out
+
+
+def main(argv: list[str] | None = None) -> int:
+    p = argparse.ArgumentParser(description="Figures and tables from results/")
+    p.add_argument("--results", default=str(REPO / "results"))
+    p.add_argument("--figures", default=None, help="default: <results>/figures")
+    p.add_argument("--tables", default=None, help="default: <results>/tables")
+    p.add_argument("--benchmark-note", default=None,
+                   help="replaces the caption of results/benchmark (the 1 Nov run, which "
+                        "records no provenance; default caption names its repeat_interleave path)")
+    args = p.parse_args(argv)
+
+    results = Path(args.results)
+    figs = Path(args.figures) if args.figures else results / "figures"
+    tables = Path(args.tables) if args.tables else results / "tables"
+
+    written = []
+    w, pre = pretrain(results, figs, tables)
+    written += w
+    w, bench = benchmark(results, figs, tables, args.benchmark_note)
+    written += w
+    written += finetune(results, figs)
+    w, evals = evaluation(results, figs, tables)
+    written += w
+    written += main_table(tables, pre, bench, evals, args.benchmark_note)
+
+    for path in written:
+        try:
+            print(path.relative_to(REPO))
+        except ValueError:
+            print(path)
+    print(f"{len(written)} files")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

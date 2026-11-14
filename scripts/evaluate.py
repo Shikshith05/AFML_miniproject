@@ -11,7 +11,11 @@ Any subset of --base/--sft/--dpo works. For every model:
   3. preference accuracy on held-out pairs (does it prefer real story endings?)
 plus, when both --sft and --dpo are given, DPO's implicit-reward accuracy.
 
-Writes results/eval/metrics.json, samples.json and samples.md.
+Writes <out>/metrics.json, samples.json and samples.md (default out:
+results/eval, the Alpaca chain). For another SFT dataset, point it at that
+chain's checkpoints and a separate folder:
+
+    python scripts/evaluate.py --base checkpoints/gqa_base/final.pt         --sft checkpoints/gqa_sft_oasst1/final.pt         --dpo checkpoints/gqa_dpo_oasst1/final.pt --out results/eval_oasst1
 
 Owner: track D.
 """
@@ -41,7 +45,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--n-test", type=int, default=200, help="must match scripts/dpo.py")
     p.add_argument("--n-ppl-stories", type=int, default=500)
     p.add_argument("--skip-ppl", action="store_true")
-    p.add_argument("--out", default="results/eval")
+    p.add_argument("--out", default="results/eval",
+                   help="output folder; use a new one per chain, e.g. results/eval_oasst1")
     return p.parse_args()
 
 
@@ -82,6 +87,9 @@ def main() -> int:
         state = load_checkpoint(path, model=model, device=device, restore_rng=False)
         model.to(device)
         m = {"checkpoint": path, "step": state["step"]}
+        if name != "base":
+            # which instruction data this model was tuned on (from its own config)
+            m["sft_dataset"] = state["config"].get("sft", {}).get("dataset_name")
 
         if stories:
             m["perplexity"] = perplexity(model, stories, pad_id=tok.pad_id,
@@ -112,8 +120,9 @@ def main() -> int:
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    (out / "metrics.json").write_text(json.dumps(metrics, indent=2))
-    (out / "samples.json").write_text(json.dumps(samples, indent=2, ensure_ascii=False))
+    (out / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+    (out / "samples.json").write_text(json.dumps(samples, indent=2, ensure_ascii=False),
+                                     encoding="utf-8")
 
     lines = ["# Samples: same prompts, same seed, every model", "",
              f"temperature {e.temperature}, top-k {e.top_k}, max {e.max_new_tokens} new tokens", ""]

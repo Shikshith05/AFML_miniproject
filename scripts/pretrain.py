@@ -3,6 +3,9 @@
     python scripts/pretrain.py --config configs/gqa_base.yaml
     python scripts/pretrain.py --preset gqa --max-steps 200 --run-name smoke
 
+    # the settings of the committed runs (decisions S11, S12):
+    python scripts/pretrain.py --preset mha --run-name mha_base         --micro-batch-size 85 --grad-accum-steps 1 --max-steps 12000 --precision fp16
+
 Owner: track C.
 """
 
@@ -29,6 +32,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--run-name", type=str, default=None)
     p.add_argument("--max-steps", type=int, default=None)
     p.add_argument("--micro-batch-size", type=int, default=None)
+    p.add_argument("--grad-accum-steps", type=int, default=None)
     p.add_argument("--precision", choices=["fp32", "fp16", "bf16"], default=None)
     p.add_argument("--device", type=str, default=None)
     p.add_argument(
@@ -57,6 +61,8 @@ def build_config(args: argparse.Namespace) -> Config:
         cfg.train.max_steps = args.max_steps
     if args.micro_batch_size is not None:
         cfg.train.micro_batch_size = args.micro_batch_size
+    if args.grad_accum_steps is not None:
+        cfg.train.grad_accum_steps = args.grad_accum_steps
     if args.precision is not None:
         cfg.train.precision = args.precision
     if args.device is not None:
