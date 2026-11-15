@@ -67,3 +67,6 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+# local recordings and paper sources (too large / not code)
+*.mp4
+AFML_IEEE_paper_overleaf.zip
